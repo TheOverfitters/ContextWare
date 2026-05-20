@@ -1,0 +1,68 @@
+{
+  "categories": [
+    {
+      "name": "System Overview",
+      "description": "Provides a general overview or describes the key features of the system."
+    },
+    {
+      "name": "AI Integration",
+      "description": "Contains specific instructions on the desired behavior and roles of agentic coding, as well as methods for integrating other AI tools."
+    },
+    {
+      "name": "Documentation",
+      "description": "Lists supplementary documents, links, or references for additional context."
+    },
+    {
+      "name": "Architecture",
+      "description": "Describes the high-level structure, design principles, or key components of the system’s architecture."
+    },
+    {
+      "name": "Impl. Details",
+      "description": "Provides specific details for implementing code or system components, including coding style guidelines."
+    },
+    {
+      "name": "Build and Run",
+      "description": "Outlines the process for compiling source code and running the application, often including key commands."
+    },
+    {
+      "name": "Testing",
+      "description": "Details the procedures and commands for executing automated tests."
+    },
+    {
+      "name": "Conf.&Env.",
+      "description": "Instructions for configuring the system and setting up the development or production environment."
+    },
+    {
+      "name": "DevOps",
+      "description": "Covers procedures for software deployment, release, and operations, such as CI/CD pipelines."
+    },
+    {
+      "name": "Development Process",
+      "description": "Defines the development workflow, including guidelines for version control systems like Git."
+    },
+    {
+      "name": "Project Management",
+      "description": "Information related to the planning, organization, and management of the project."
+    },
+    {
+      "name": "Maintenance",
+      "description": "Guidelines for system maintenance, including strategies for improving readability, detecting and resolving bugs."
+    },
+    {
+      "name": "Debugging",
+      "description": "Explains error handling techniques and methods for identifying and resolving issues."
+    },
+    {
+      "name": "Performance",
+      "description": "Focuses on system performance, quality assurance, and potential optimizations."
+    },
+    {
+      "name": "Security",
+      "description": "Addresses security considerations, vulnerabilities, or best practices for the system."
+    },
+    {
+      "name": "UI/UX",
+      "description": "Contains guidelines or details concerning the user interface (UI) and user experience (UX)."
+    }
+  ]
+}
