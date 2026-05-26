@@ -92,6 +92,19 @@ def load_diffs_from_acf_data(data: Any) -> list[dict[str, Any]]:
         return diffs
 
     if isinstance(data, list):
+        # List of repo objects (each has "acf_commits")
+        if data and isinstance(data[0], dict) and "acf_commits" in data[0]:
+            diffs: list[dict[str, Any]] = []
+            for repo_obj in data:
+                if not isinstance(repo_obj, dict):
+                    continue
+                repo_name = str(repo_obj.get("repo") or repo_obj.get("repository") or "")
+                for diff in load_diffs_from_acf_data(repo_obj):
+                    diff["repo"] = repo_name
+                    diffs.append(diff)
+            return diffs
+
+        # List of flat diff objects
         diffs = []
         for idx, item in enumerate(data):
             if not isinstance(item, dict):

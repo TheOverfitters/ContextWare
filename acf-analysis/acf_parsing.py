@@ -168,8 +168,6 @@ def parse_primary_response(
         fallback_category=fallback_category,
         threshold=threshold,
     )
-    if confidence_categories:
-        parsed = normalize_category_confidences(parsed, confidence_categories)
     return parsed, []
 
 
@@ -187,20 +185,14 @@ def build_category_confidences(
 
     raw_confidences = parsed.get("category_confidences")
     if isinstance(raw_confidences, dict):
-        normalized: dict[str, float] = {}
-        total = 0.0
+        result: dict[str, float] = {}
         for category in categories:
             raw_value = raw_confidences.get(category)
             if isinstance(raw_value, (int, float)):
-                value = max(0.0, float(raw_value))
-                normalized[category] = value
-                total += value
-        if total > 0:
-            for category in normalized:
-                normalized[category] = normalized[category] / total
-            for category in categories:
-                normalized.setdefault(category, 0.0)
-            return normalized
+                result[category] = max(0.0, min(1.0, float(raw_value)))
+            else:
+                result[category] = 0.0
+        return result
 
     category = parsed.get("category")
     confidence = parsed.get("confidence")

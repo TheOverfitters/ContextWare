@@ -62,7 +62,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--model", type=str, default=DEFAULT_MODEL)
     parser.add_argument("--categories", type=str, default=None)
-    parser.add_argument("--max-diff-chars", type=int, default=12000)
+    parser.add_argument("--max-diff-chars", type=int, default=60000)
     parser.add_argument("--max-tokens", type=int, default=1200)
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--top-p", type=float, default=0.95)
@@ -250,6 +250,23 @@ def main() -> None:
                     primary_parsed = build_fallback_primary(primary_raw, fallback_category)
 
                 is_valid = not validation_errors
+                _repo = diff.get("repo", repo_label)
+                _status = "ok" if is_valid else ("retried_ok" if retry_attempted else "fallback")
+                print(f"  repo={_repo} | status={_status} | errors={validation_errors or '-'}")
+                if isinstance(primary_parsed, dict):
+                    _raw_confs = primary_parsed.get("category_confidences") or {}
+                    if isinstance(_raw_confs, dict) and _raw_confs:
+                        _top5 = sorted(_raw_confs.items(), key=lambda x: x[1], reverse=True)[:5]
+                        for _rank, (_lbl, _c) in enumerate(_top5, 1):
+                            _marker = " <-- best" if _rank == 1 else ""
+                            print(f"    {_rank}. {_lbl:<25} {_c:.3f}{_marker}")
+                    else:
+                        _cat = primary_parsed.get("category", "?")
+                        _conf = primary_parsed.get("confidence", 0.0)
+                        print(f"    1. {_cat:<25} {_conf:.3f} <-- best (no category_confidences)")
+                    _rationale = primary_parsed.get("rationale", "")
+                    if _rationale:
+                        print(f"  reason: {_rationale}")
                 if retry_attempted:
                     parse_status = "retried_ok" if is_valid else "fallback"
                 else:

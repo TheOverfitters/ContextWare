@@ -94,8 +94,8 @@ def get_primary_prompt_template() -> str:
     Must equal category_confidences[chosen category] exactly.
 
     category_confidences
-    Include every sampled candidate. All values are floats in [0.0, 1.0].
-    Values must sum to 1.0.
+    Include every sampled candidate. Each value is an independent float in [0.0, 1.0]
+    representing how well the diff matches that category on its own — values do NOT need to sum to 1.0.
 
     
     CLASSIFICATION RULES
