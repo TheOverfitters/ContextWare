@@ -5,6 +5,7 @@ import csv
 import json
 import os
 import time
+import http.client
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -69,13 +70,23 @@ def rest_get_json(url: str, token: Optional[str]) -> Tuple[dict, int, dict]:
         headers["Authorization"] = f"Bearer {token}"
 
     waited_total = 0
+    max_retries = 5
+    retry_attempt = 0
     while True:
         req = urllib.request.Request(url, headers=headers)
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 body = resp.read().decode("utf-8")
                 data = json.loads(body) if body else {}
                 return data, resp.status, dict(resp.headers)
+        except (http.client.IncompleteRead, urllib.error.URLError, TimeoutError):
+            retry_attempt += 1
+            if retry_attempt >= max_retries:
+                return {"message": "network error after retries"}, 0, {}
+            wait = min(2 ** retry_attempt, 30)
+            print(f"Network error on {url}, retrying in {wait}s ({max_retries - retry_attempt} left)...")
+            time.sleep(wait)
+            continue
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8")
             try:
@@ -601,8 +612,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--target-filename",
-        default="CLAUDE.md",
-        help="Only process rows whose filename matches this",
+        nargs="*",
+        default=["CLAUDE.md", "AGENTS.md"],
+        help="Filenames to process (space-separated). Default: CLAUDE.md AGENTS.md",
     )
     parser.add_argument(
         "--max-rows",
@@ -643,6 +655,11 @@ def main() -> int:
         default=0,
         help="Max commits per repository history (0 = all)",
     )
+    parser.add_argument(
+        "--all-diffs",
+        action="store_true",
+        help="Fetch all available diffs for each file (no window limit)",
+    )
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
     global WAIT_ON_RATE_LIMIT, MAX_RATE_LIMIT_WAIT_S
@@ -653,10 +670,13 @@ def main() -> int:
     token = os.environ.get(args.token_env)
 
     windows = [int(x) for x in args.windows.split(",") if x.strip().isdigit()]
-    if not windows:
+    if not args.all_diffs and not windows:
         print("No valid windows provided.")
         return 2
-    max_steps = max(windows)
+    if args.all_diffs:
+        max_steps = 999_999
+    else:
+        max_steps = max(windows)
 
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
 
@@ -666,7 +686,7 @@ def main() -> int:
     for row in iter_rows(args.csv, args.max_rows):
         if args.target_filename:
             filename = (row.get("filename") or "").strip()
-            if filename != args.target_filename:
+            if filename not in args.target_filename:
                 continue
 
         owner = (row.get("repository_owner") or "").strip()
@@ -870,6 +890,20 @@ def main() -> int:
             else:
                 diff_data = extract_file_diff(compare_json, file_path)
 
+            commit_message = ""
+            commit_author = ""
+            commit_date = ""
+            if status == 200:
+                compare_commits_list = compare_json.get("commits") or []
+                if compare_commits_list:
+                    last_commit = compare_commits_list[-1]
+                    commit_obj = last_commit.get("commit") or {}
+                    author_obj = commit_obj.get("author") or {}
+                    committer_obj = commit_obj.get("committer") or {}
+                    commit_message = (commit_obj.get("message") or "").splitlines()[0]
+                    commit_author = author_obj.get("name") or committer_obj.get("name") or ""
+                    commit_date = author_obj.get("date") or committer_obj.get("date") or ""
+
             record = {
                 "repository_owner": owner,
                 "repository_name": repo,
@@ -882,6 +916,9 @@ def main() -> int:
                 "base_sha": base_sha,
                 "head_sha": head_sha,
                 "compare_html_url": compare_json.get("html_url"),
+                "commit_message": commit_message,
+                "commit_author": commit_author,
+                "commit_date": commit_date,
                 "diff": diff_data,
             }
 

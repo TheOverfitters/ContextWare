@@ -1,7 +1,7 @@
 import json
 from collections import defaultdict
 
-INPUT_FILE = "outputs/git_history_diffs.json"
+INPUT_FILE = "outputs/git_history_diffs.jsonl"
 OUTPUT_FILE = "outputs/git_history_diffs.json"
 
 # Read JSONL
@@ -23,9 +23,15 @@ for entry in entries:
     if repo_key not in repo_meta:
         repo_meta[repo_key] = {
             "acf_patterns": set(),
+            "last_commit_date": "",
+            "last_commit_diff_index": float("inf"),
         }
     escaped = entry['file_path'].replace('.', r'\.')
     repo_meta[repo_key]["acf_patterns"].add(f"^{escaped}$")
+    diff_index = entry.get("diff_index") or float("inf")
+    if diff_index < repo_meta[repo_key]["last_commit_diff_index"]:
+        repo_meta[repo_key]["last_commit_diff_index"] = diff_index
+        repo_meta[repo_key]["last_commit_date"] = entry.get("commit_date", "")
 
     repos[repo_key][commit_key].append(entry)
 
@@ -85,6 +91,7 @@ for repo_key in sorted(repos.keys()):
 
     repo_entry = {
         "repo": repo_key,
+        "last_commit_date": meta["last_commit_date"],
         "total_diffs_found": len(acf_commits),
         "acf_patterns": sorted(meta["acf_patterns"]),
         "acf_commits": acf_commits,
