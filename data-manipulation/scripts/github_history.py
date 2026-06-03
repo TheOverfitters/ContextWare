@@ -558,11 +558,12 @@ def extract_file_diff(compare_json: dict, file_path: str) -> dict:
         prev_name = entry.get("previous_filename")
         if filename == file_path or prev_name == file_path:
             patch = entry.get("patch")
+            status = entry.get("status")
             added_lines, removed_lines = parse_patch_lines(patch)
-            return {
+            result = {
                 "filename": filename,
                 "previous_filename": prev_name,
-                "status": entry.get("status"),
+                "status": status,
                 "additions": entry.get("additions"),
                 "deletions": entry.get("deletions"),
                 "changes": entry.get("changes"),
@@ -570,6 +571,16 @@ def extract_file_diff(compare_json: dict, file_path: str) -> dict:
                 "added_lines": added_lines,
                 "removed_lines": removed_lines,
             }
+            if patch is None:
+                if status == "renamed":
+                    result["patch_missing_reason"] = "file_renamed_no_content_change"
+                elif status == "removed":
+                    result["patch_missing_reason"] = "file_deleted"
+                elif status == "added":
+                    result["patch_missing_reason"] = "file_added_too_large"
+                else:
+                    result["patch_missing_reason"] = "file_too_large_or_binary"
+            return result
     return {"status": "not_found"}
 
 

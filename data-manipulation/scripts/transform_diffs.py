@@ -82,6 +82,9 @@ for repo_key in sorted(repos.keys()):
             "content_commit_sha": first.get("content_commit_sha"),
             "commit_source": first.get("commit_source"),
             "url": first.get("compare_html_url", f"https://github.com/{repo_key}/commit/{head_sha}"),
+            "commit_author": first.get("commit_author", ""),
+            "commit_date": first.get("commit_date", ""),
+            "commit_message": first.get("commit_message", ""),
             "acf_files": acf_files,
         }
         acf_commits.append(commit_entry)
