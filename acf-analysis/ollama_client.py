@@ -113,6 +113,61 @@ class SlidingRateLimiter:
         self.last_request_ts = now_ts
 
 
+def fetch_model_context_size(
+    base_url: str,
+    api_key: str,
+    model: str,
+    timeout_seconds: int = 10,
+) -> int | None:
+    """Query Ollama /api/show to read the model's configured context size.
+
+    Tries, in order:
+      1. ``model_info`` dict (any key containing "context_length") — newer Ollama
+      2. ``parameters`` field parsed for ``num_ctx <value>``
+      3. ``modelfile`` parsed for ``PARAMETER num_ctx <value>``
+
+    Returns None if the endpoint is unavailable or the value cannot be found.
+    """
+    endpoint = f"{base_url.rstrip('/')}/api/show"
+    payload = json.dumps({"model": model}).encode("utf-8")
+    request = Request(
+        endpoint,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            data = json.loads(response.read().decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+
+    # Newer Ollama exposes model_info with architecture-prefixed keys.
+    model_info = data.get("model_info") or {}
+    for key, val in model_info.items():
+        if "context_length" in key and isinstance(val, int) and val > 0:
+            return val
+
+    # Older Ollama exposes a plain "parameters" string.
+    parameters = data.get("parameters", "")
+    if isinstance(parameters, str):
+        m = re.search(r"num_ctx\s+(\d+)", parameters)
+        if m:
+            return int(m.group(1))
+
+    # Fallback: parse the modelfile directly.
+    modelfile = data.get("modelfile", "")
+    if isinstance(modelfile, str):
+        m = re.search(r"PARAMETER\s+num_ctx\s+(\d+)", modelfile, re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+
+    return None
+
+
 def estimate_tokens(text: str) -> int:
     return max(1, int(len(text) / 4))
 
@@ -292,6 +347,8 @@ def call_ollama_chat_completion(
     max_completion_tokens: int,
     top_p: float,
     request_logprobs: bool,
+    response_schema: dict | None = None,
+    context_size: int | None = None,
 ) -> OllamaChatResult:
     endpoint = f"{base_url.rstrip('/')}/api/chat"
     options = {
@@ -299,6 +356,8 @@ def call_ollama_chat_completion(
         "top_p": top_p,
         "num_predict": max_completion_tokens,
     }
+    if context_size is not None:
+        options["num_ctx"] = context_size
     if request_logprobs:
         options["logprobs"] = True
 
@@ -309,6 +368,8 @@ def call_ollama_chat_completion(
         "options": options,
         "logprobs": request_logprobs,
     }
+    if response_schema is not None:
+        payload["format"] = response_schema
 
     request = Request(
         endpoint,
@@ -329,6 +390,43 @@ def call_ollama_chat_completion(
         raise ValueError("Missing 'message' field in Ollama response")
 
     content = message.get("content", "")
+
+    # Some reasoning/thinking models produce empty content and put the actual
+    # answer in a separate field (e.g. "thinking", "reasoning_content").
+    # Fall back to those fields so the pipeline can still extract JSON.
+    if not content:
+        for alt_key in ("thinking", "reasoning_content", "reasoning", "tool_calls"):
+            alt = message.get(alt_key)
+            if isinstance(alt, str) and alt.strip():
+                logger.warning(
+                    "EMPTY_CONTENT | message.content is empty; "
+                    "falling back to message.%s (%d chars)",
+                    alt_key,
+                    len(alt),
+                )
+                content = alt
+                break
+            if alt_key == "tool_calls" and isinstance(alt, list) and alt:
+                # Some models encode the JSON answer as a tool-call argument.
+                try:
+                    tc_args = alt[0].get("function", {}).get("arguments", "")
+                    if tc_args:
+                        logger.warning(
+                            "EMPTY_CONTENT | falling back to tool_calls[0].function.arguments"
+                        )
+                        content = tc_args
+                        break
+                except Exception:
+                    pass
+
+    if not content:
+        # Log the full raw response once so the operator can diagnose.
+        logger.warning(
+            "EMPTY_CONTENT | message.content is empty and no fallback found. "
+            "Full response (first 500 chars): %s",
+            raw_response[:500],
+        )
+
     logprobs = extract_logprobs(parsed, prefer_prompt=False) if request_logprobs else None
     return OllamaChatResult(content=str(content), logprobs=logprobs)
 
@@ -381,7 +479,7 @@ def call_chat_with_retries(
     base_url: str,
     api_key: str,
     timeout_seconds: int,
-    prompt: str,
+    messages: list[dict[str, str]],
     model: str,
     temperature: float,
     top_p: float,
@@ -392,19 +490,26 @@ def call_chat_with_retries(
     rate_limit_wait_max_seconds: int,
     hard_cooldown_seconds: int,
     request_logprobs: bool,
+    response_schema: dict | None = None,
+    context_size: int | None = None,
 ) -> OllamaChatResult:
-    estimated_tokens_needed = estimate_tokens(prompt) + max_completion_tokens + 500
+    estimated_tokens_needed = (
+        sum(estimate_tokens(m.get("content", "")) for m in messages)
+        + max_completion_tokens + 500
+    )
     return _call_with_retries(
         request_fn=lambda: call_ollama_chat_completion(
             base_url=base_url,
             api_key=api_key,
             timeout_seconds=timeout_seconds,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             model=model,
             temperature=temperature,
             max_completion_tokens=max_completion_tokens,
             top_p=top_p,
             request_logprobs=request_logprobs,
+            response_schema=response_schema,
+            context_size=context_size,
         ),
         rate_limiter=rate_limiter,
         estimated_tokens=estimated_tokens_needed,

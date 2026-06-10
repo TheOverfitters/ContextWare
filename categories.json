@@ -2,67 +2,86 @@
   "categories": [
     {
       "name": "System Overview",
-      "description": "Provides a general overview or describes the key features of the system."
+      "description": "Provides a general overview or describes the key features of the system. Look for: project purpose statements, feature lists, high-level descriptions of what the system does, technology stack summaries. NOT this if: the text tells an AI agent how to behave, assigns it a role, or instructs it on workflows (→ AI Integration). NOT this if: it describes how modules/components are connected (→ Architecture). Use System Overview only when the diff reads like a README introduction with no actionable guidance for any other category.",
+      "example": "Brightroom is a composable image editor library for iOS, powered by Metal for high-performance image processing. It provides both low-level image editing capabilities and high-level UI components."
     },
     {
       "name": "AI Integration",
-      "description": "Contains specific instructions on the desired behavior and roles of agentic coding, as well as methods for integrating other AI tools."
+      "description": "Contains specific instructions on the desired behavior and roles of agentic coding, as well as methods for integrating other AI tools. Look for: direct agent directives ('Claude should...', 'Always ask before...', 'When using AI tools...'), MCP server configs, tool use policies, agent personas, references to CLAUDE.md/AGENTS.md conventions, agentic workflow rules, default LLM model specifications for agent tasks. NOT this if: the text only describes the project without directing agent behavior (→ System Overview). NOT this if: the text is general coding guidelines with no AI-specific language (→ Impl. Details). NOT this if: the change only updates a specific command, script name, or tool name that the agent should invoke — even when phrased as an agent rule (e.g. changing 'use pgrun' to 'use polter' updates a build tool, not the behavioral rule itself → Build and Run). NOT this if: the change adds or updates build steps, test procedures, or environment setup even when written in imperative language directed at an AI agent — classify by the semantic topic of the change (→ Build and Run, Testing, Conf.&Env., etc.). The key signal is that the change defines or modifies the agent's role, decision-making policy, or which AI model/provider to use — not merely which command to run.",
+      "examples": [
+        "You are an expert in React, Next.js, and content management for technology community websites. You specialize in helping with this project's platform, providing guidance on development, content management, and performance.",
+        "Use `gpt-5` as the default model for all agent tasks — it excels at multi-step reasoning and coding. For cost-sensitive tasks, prefer `gpt-5-mini`. Do not use GPT-4o unless explicitly requested."
+      ]
     },
     {
       "name": "Documentation",
-      "description": "Lists supplementary documents, links, or references for additional context."
+      "description": "Lists supplementary documents, links, or references for additional context. Look for: links to wikis, READMEs, external docs, JSDoc/docstring policies, inline comment conventions, API documentation requirements, changelog entries and Recent Updates sections, version notes (e.g. 'Version bumped to X.Y.Z'), breaking-change notices, instructions to maintain or update the context file itself. CRITICAL: the fact that a change is made TO a context file (CLAUDE.md, AGENTS.md) does NOT make it Documentation — classify by what the change DOES, not where it appears. The reliable signal for Documentation is an actual hyperlink, a file path to consult, or an explicit cross-reference ('see X for details'). Prose that explains HOW to do something without a pointer is NOT Documentation — score it by topic (Impl. Details, Architecture, Build and Run, etc.). NOT this if: the diff adds or modifies command-line instructions, build steps, tool usage procedures, or run commands — even with explanatory prose (→ Build and Run). NOT this if: the diff describes technical patterns, threading rules, architectural guidelines, component relationships, or API usage — even under a 'documentation section' header (→ Architecture or Impl. Details). NOT this if: the diff adds agent configuration, model selection, AI behavior rules, or system prompt content (→ AI Integration). NOT this if: the diff describes code formatting rules, file header conventions, naming styles, or language-specific coding idioms (→ Impl. Details). NOT this if: the diff is itself a project description with no documentation pointers (→ System Overview).",
+      "example": "## Additional Resources\nFor details beyond this file, consult:\n- Full API reference: https://docs.example.com/api\n- Architecture decisions: [docs/adr/](./docs/adr/)\n- External tool docs: https://github.com/owner/tool#readme\n\n## Recent Updates\n- **v2.1.0** (2025-03-10): Migrated auth to OAuth2. See [migration guide](./docs/oauth-migration.md)."
     },
     {
       "name": "Architecture",
-      "description": "Describes the high-level structure, design principles, or key components of the system’s architecture."
+      "description": "Describes the high-level structure, design principles, or key components of the system's architecture. Look for: component diagrams, module/package boundaries, design patterns (e.g. DI, event-driven), dependency rules, monorepo layout descriptions, layer constraints ('business logic must reside in core'). NOT this if: it only names what the project does without explaining structure (→ System Overview). NOT this if: it prescribes how to write individual functions or variables (→ Impl. Details). The key signal is structural constraints between components, not coding style.",
+      "example": "## Architecture\n- The project is a pnpm workspace with several packages under `src/`:\n  - `core` - shared business logic in TypeScript\n  - `background` - initializes the extension store and wires services\n  - `popup` - React user interface\n- Business logic must reside in `src/core`; UI components must come from `src/design-system/src`."
     },
     {
       "name": "Impl. Details",
-      "description": "Provides specific details for implementing code or system components, including coding style guidelines."
+      "description": "Provides specific details for implementing code or system components, including coding style guidelines. Look for: naming conventions (camelCase, snake_case), code style rules, language-specific idioms, API usage patterns, data model definitions, type annotation requirements. NOT this if: it defines how modules relate to each other (→ Architecture). NOT this if: it describes the overall system (→ System Overview). The key signal is rules that apply at the function/class/variable level, not the module level.",
+      "example": "# Code Style\n- Keep code simple, explicit, typed, test-driven, and ready for automation.\n- Source files must contain only ASCII characters. No wildcard imports.\n- Classes: CamelCase. Functions/variables: snake_case. Constants: UPPER_SNAKE."
     },
     {
       "name": "Build and Run",
-      "description": "Outlines the process for compiling source code and running the application, often including key commands."
+      "description": "Outlines the process for compiling source code and running the application, often including key commands. Look for: build commands (npm run build, make, cargo build), dev server startup, run instructions, startup scripts. NOT this if: the focus is on environment variables or .env file setup without build commands (→ Conf.&Env.). NOT this if: it describes deployment to a server or CI pipeline (→ DevOps). The key signal is commands a developer runs locally to build or start the app.",
+      "example": "## Build Commands\n- `npm run dev` - WXT dev server with live reload for Chromium targets\n- `npm run dev:firefox` - Firefox MV2 dev session\n- `npm run build` - Production build (validates locale files, updates manifest)\n- `npm run build:firefox` - Build and package for Firefox"
     },
     {
       "name": "Testing",
-      "description": "Details the procedures and commands for executing automated tests."
+      "description": "Details the procedures and commands for executing automated tests. Look for: test commands (npm test, pytest, jest, vitest), test coverage rules, testing frameworks, test file conventions, instructions on what and how to test. NOT this if: it mentions tests only as a step inside a CI pipeline definition (→ DevOps). NOT this if: it is about debugging a test failure (→ Debugging).",
+      "example": "### Testing\n- Write tests using DOM and user interactions, not internal implementation details.\n- **Core tests**: `yarn test:core` — Takes ~2 seconds. NEVER CANCEL.\n- **ALWAYS** run `yarn test:core` and `yarn test:web` after making changes."
     },
     {
       "name": "Conf.&Env.",
-      "description": "Instructions for configuring the system and setting up the development or production environment."
+      "description": "Instructions for configuring the system and setting up the development or production environment. Look for: .env file setup, config file locations, environment variables, feature flags, secrets management, dependency installation steps. NOT this if: the primary content is build or run commands (→ Build and Run). NOT this if: it describes infrastructure provisioning or deployment pipelines (→ DevOps). The key signal is configuration values, env vars, and setup steps that precede building.",
+      "example": "## Environment Setup\n# Create and activate virtual environment\nuv venv\nsource .venv/bin/activate  # Linux/macOS\n.venv\\Scripts\\Activate.ps1  # Windows\n# Install dependencies with development tools\nuv pip install -e \".[dev]\""
     },
     {
       "name": "DevOps",
-      "description": "Covers procedures for software deployment, release, and operations, such as CI/CD pipelines."
+      "description": "Covers procedures for software deployment, release, and operations, such as CI/CD pipelines. Look for: GitHub Actions / CI pipeline definitions, deployment scripts, container/Kubernetes setup, release process, monitoring and alerting. NOT this if: the commands are meant to be run locally by a developer (→ Build and Run). NOT this if: it only describes Git branching rules with no pipeline involvement (→ Development Process). The key signal is automation that runs on servers or CI runners.",
+      "example": "## CI Parity\nThe CI pipeline is defined in `.github/workflows/ci.yml` and includes:\n- `cargo check` for all targets\n- `cargo test` on core crates\n- `cargo fmt -- --check`\n- `cargo clippy -D warnings`\n- Typos check (`crate-ci/typos`)"
     },
     {
       "name": "Development Process",
-      "description": "Defines the development workflow, including guidelines for version control systems like Git."
+      "description": "Defines the development workflow, including guidelines for version control systems like Git. Look for: branching strategy, commit message conventions, PR/code review rules, Git workflow instructions, merge policies. NOT this if: it describes automated CI/CD pipelines that run without human intervention (→ DevOps). NOT this if: it is about project planning or milestones (→ Project Management). The key signal is rules that a developer manually follows when committing or submitting a PR.",
+      "example": "## Commit & Pull Request Guidelines\n- Commits: imperative mood; prefer Conventional Commits (e.g., `feat:`, `fix:`, `docs:`) with a clear scope.\n- Before pushing: run `just fmt`, `just mypy`, and `just test`.\n- PRs: include summary, linked issues, screenshots for UI changes. CI must be green."
     },
     {
       "name": "Project Management",
-      "description": "Information related to the planning, organization, and management of the project."
+      "description": "Information related to the planning, organization, and management of the project. Look for: issue tracking conventions, sprint/milestone references, roadmap items, contributor onboarding, task assignment and backlog management. NOT this if: it describes day-to-day coding workflow or Git rules (→ Development Process). NOT this if: it is a technical description of the project (→ System Overview).",
+      "example": "## Backlog & Future Improvements\nThe `backlog/` directory contains planned improvements and refactoring tasks.\n- Format: Markdown files with structured plans and mandatory YAML front matter (`status`, `date_created`, `date_modified`).\n- When suggesting improvements, reference backlog items to understand context and priorities."
     },
     {
       "name": "Maintenance",
-      "description": "Guidelines for system maintenance, including strategies for improving readability, detecting and resolving bugs."
+      "description": "Guidelines for system maintenance, including strategies for improving readability, detecting and resolving bugs. Look for: refactoring guidelines, readability improvements, dead code removal, dependency upgrade policies, technical debt management, backward-compatibility rules, code health checklists. NOT this if: it is about diagnosing or fixing a specific runtime error (→ Debugging). NOT this if: it describes performance optimization (→ Performance). The key signal is long-term code quality rules applied proactively, not reactive problem-solving.",
+      "example": "## Core Development Principles\n### Maintain Stable Public Interfaces — CRITICAL\nAlways attempt to preserve function signatures, argument positions, and names for exported/public methods.\nBefore making ANY changes to public APIs: check if the function is exported in `__init__.py` and look for existing usage patterns in tests."
     },
     {
       "name": "Debugging",
-      "description": "Explains error handling techniques and methods for identifying and resolving issues."
+      "description": "Explains error handling techniques and methods for identifying and resolving issues. Look for: error handling patterns, logging practices, debug commands, troubleshooting steps, exception management rules, stack trace guidance. NOT this if: it is about proactive code quality improvement without a specific error context (→ Maintenance). NOT this if: it is about performance profiling without an error (→ Performance). The key signal is reactive problem-solving: how to respond when something breaks.",
+      "example": "### Debugging Tips\n- Use `DEBUG=1` for verbose output\n- Check `error.log` for detailed errors\n- Use `RUST_BACKTRACE=1` for stack traces\n- Profile with `cargo flamegraph` for performance analysis"
     },
     {
       "name": "Performance",
-      "description": "Focuses on system performance, quality assurance, and potential optimizations."
+      "description": "Focuses on system performance and potential optimizations. Look for: profiling instructions, caching strategies, pagination rules, performance budgets, optimization guidelines, lazy loading, query optimization. NOT this if: the focus is on fixing a crash or error (→ Debugging). NOT this if: it is about general code quality without speed/resource intent (→ Maintenance).",
+      "example": "## Performance Guidelines\n- React 19 compiler handles most memo/callback optimizations automatically.\n- When to still optimize manually: heavy computational functions inside components, complex object/array transformations.\n- Avoid inline object/array creation in render. Debounce/throttle expensive operations."
     },
     {
       "name": "Security",
-      "description": "Addresses security considerations, vulnerabilities, or best practices for the system."
+      "description": "Addresses security considerations, vulnerabilities, or best practices for the system. Look for: authentication/authorization rules, secret handling, input validation, CVE mitigations, security review checklists, encryption policies. NOT this if: it mentions tokens only as configuration values with no security context (→ Conf.&Env.).",
+      "example": "## Security Architecture and Permission System\n### Core Security Principles\n- Workspace Isolation: by default all services are `protected`, accessible only within the same workspace.\n- Default Protection prevents unauthorized cross-workspace access without requiring explicit permission checks in every method."
     },
     {
       "name": "UI/UX",
-      "description": "Contains guidelines or details concerning the user interface (UI) and user experience (UX)."
+      "description": "Contains guidelines or details concerning the user interface (UI) and user experience (UX). Look for: design system references, accessibility rules, component usage guidelines, styling conventions, UX patterns, responsive design rules. NOT this if: it is about API design or data models with no visual/interaction component (→ Impl. Details).",
+      "example": "## User Experience Standards\nThis project follows an invisible, Netflix-like user experience where data loading and processing happens automatically in the background.\n- Database-first: always query cached data before API calls.\n- No manual intervention: users never need to click 'Load Data' or understand technical details."
     }
   ]
 }
