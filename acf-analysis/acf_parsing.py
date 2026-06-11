@@ -1,23 +1,100 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
-from acf_prompt import SIGNAL_CATEGORY_MAP
+# from acf_prompt import SIGNAL_CATEGORY_MAP
 
 
-ALLOWED_CHANGE_TYPES = {
-    "addition",
-    "modification",
-    "deletion",
-    "refactor",
-    "formatting",
-    "metadata",
-    "other",
-}
+# Repairs a JSON snippet that failed to parse, If the snippet is not reparable, returns None.
+def _repair_json_snippet(snippet: str) -> dict[str, Any] | None:
+    """Try common repairs on a JSON snippet that failed json.loads.
+
+    Handles:
+      * stray all-whitespace quoted strings the model emits as botched
+        indentation, e.g.  ..."System Overview","     "summary":...  where
+        the next key's opening quote was merged into a whitespace string;
+      * trailing commas before } or ];
+      * truncated structures where the model stopped generating mid-object.
+    """
+    # Collapse  "<whitespace>"<word>"  ->  "<word>"  (the de-indentation tic).
+    snippet = re.sub(r'"\s+"(\w+)"', r'"\1"', snippet)
+    try:
+        return json.loads(snippet)
+    except json.JSONDecodeError:
+        pass
+
+    fixed = re.sub(r",\s*([}\]])", r"\1", snippet)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+    open_braces = fixed.count("{") - fixed.count("}")
+    open_brackets = fixed.count("[") - fixed.count("]")
+    if open_braces > 0 or open_brackets > 0:
+        last_sep = max(fixed.rfind(","), fixed.rfind("["), 0)
+        if last_sep > 0:
+            closed = fixed[:last_sep] + ("]" * max(0, open_brackets)) + ("}" * max(0, open_braces))
+            try:
+                return json.loads(closed)
+            except json.JSONDecodeError:
+                pass
+    return None
+
+# Extract category scores from raw text using regex patterns, even when JSON parsing fails
+def _extract_partial_vector(raw_text: str, categories: list[str]) -> dict[str, float]:
+    vector: dict[str, float] = {c: 0.0 for c in categories}
+
+    # Pattern 1: inline key-value  "Category": 0.8
+    for category in categories:
+        m = re.search(
+            r'["\']?' + re.escape(category) + r'["\']?\s*[:\s]+\s*([0-9]+(?:\.[0-9]+)?)',
+            raw_text,
+            re.IGNORECASE,
+        )
+        if m:
+            try:
+                vector[category] = max(0.0, min(1.0, float(m.group(1))))
+            except ValueError:
+                pass
+
+    # Pattern 2 & 3: {"name": "Category", ..., "score": 0.8} within 300 chars
+    for category in categories:
+        if vector[category] > 0.0:
+            continue
+        for pat in (
+            r'"name"\s*:\s*["\']' + re.escape(category) + r'["\'].{0,300}?"score"\s*:\s*([0-9]+(?:\.[0-9]+)?)',
+            r'"score"\s*:\s*([0-9]+(?:\.[0-9]+)?).{0,300}?"name"\s*:\s*["\']' + re.escape(category) + r'["\']',
+        ):
+            m = re.search(pat, raw_text, re.IGNORECASE | re.DOTALL)
+            if m:
+                try:
+                    vector[category] = max(0.0, min(1.0, float(m.group(1))))
+                    break
+                except ValueError:
+                    pass
+
+    # Pattern 4: primary_category field → boost that category if still zero
+    m = re.search(r'"primary_category"\s*:\s*["\']([^"\']+)["\']', raw_text, re.IGNORECASE)
+    if m:
+        primary = m.group(1).strip()
+        if primary in vector and vector[primary] == 0.0:
+            vector[primary] = 0.65
+
+    return vector
 
 
 def extract_json_object(raw_text: str) -> dict[str, Any] | None:
+    """Find and return the first balanced top-level JSON object in *raw_text*.
+
+    Handles extra prose/markdown around the response and is escape-aware
+    inside string literals. When json.loads fails on a balanced snippet,
+    attempts JSON repair before moving on.
+    """
+    raw_text = re.sub(r'"\s+"(\w+)"', r'"\1"', raw_text)
+    raw_text = re.sub(r'}(\s*,\s*)("primary_category")', r'}]\1\2', raw_text)
+
     start: int | None = None
     depth = 0
     in_string = False
@@ -52,10 +129,177 @@ def extract_json_object(raw_text: str) -> dict[str, Any] | None:
                 try:
                     return json.loads(snippet)
                 except json.JSONDecodeError:
+                    repaired = _repair_json_snippet(snippet)
+                    if repaired is not None:
+                        return repaired
                     start = None
     return None
 
 
+# Score coercion and validation helpers for multi-label parsing.
+def _coerce_score(value: Any) -> float | None:
+    """Coerce *value* to a float in [0.0, 1.0]; return None on failure.
+
+    Tolerates the model emitting a score as a numeric string (e.g.
+    ``"score": "0.85"`` or ``"0,85"``) instead of a JSON number, which would
+    otherwise be silently dropped to 0.0.
+    """
+    if isinstance(value, bool):
+        # bool is a subclass of int -- treat explicitly.
+        return 1.0 if value else 0.0
+    if isinstance(value, (int, float)):
+        return max(0.0, min(1.0, float(value)))
+    if isinstance(value, str):
+        # Accept a numeric string, tolerating a comma decimal separator and
+        # surrounding whitespace/quotes the model sometimes leaves in.
+        cleaned = value.strip().strip('"').strip("'").replace(",", ".")
+        try:
+            return max(0.0, min(1.0, float(cleaned)))
+        except ValueError:
+            return None
+    return None
+
+
+def validate_multilabel_payload(
+    payload: dict[str, Any],
+    categories: list[str],
+) -> list[str]:
+    """Return a list of human-readable validation errors (empty == OK).
+
+    A well-formed payload has:
+      * ``categories`` -- a list with one entry per category name; each
+        entry has ``name``, ``score`` (0.0-1.0), and ``rationale``.
+      * ``primary_category`` -- one of the known category names.
+      * ``summary`` -- a short non-empty string.
+    """
+    errors: list[str] = []
+    cat_entries = payload.get("categories")
+    if not isinstance(cat_entries, list):
+        return ["categories_missing_or_not_list"]
+
+    seen: set[str] = set()
+    for idx, entry in enumerate(cat_entries):
+        if not isinstance(entry, dict):
+            errors.append(f"categories[{idx}].not_object")
+            continue
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            errors.append(f"categories[{idx}].name_invalid")
+            continue
+        seen.add(name)
+        score = _coerce_score(entry.get("score"))
+        if score is None:
+            errors.append(f"categories[{idx}].score_invalid({name})")
+        rationale = entry.get("rationale")
+        if not isinstance(rationale, str):
+            errors.append(f"categories[{idx}].rationale_invalid({name})")
+
+    missing = [c for c in categories if c not in seen]
+    if missing:
+        errors.append(f"categories_missing_entries:{','.join(missing)}")
+
+    primary = payload.get("primary_category")
+    if not isinstance(primary, str) or primary not in categories:
+        errors.append("primary_category_invalid")
+
+    summary = payload.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        errors.append("summary_invalid")
+
+    return errors
+
+# Multilabel parsing and aggregation helpers, including rescue heuristics when parsing fails.
+def parse_multilabel_response(
+    raw_text: str,
+    categories: list[str],
+) -> tuple[dict[str, Any] | None, list[str], dict[str, float]]:
+    """Parse a multi-label LLM response.
+
+    Returns ``(parsed, errors, score_vector)`` where:
+      * ``parsed`` is the extracted JSON object (or None on extraction
+        failure).
+      * ``errors`` is the list of validation issues (empty == OK).
+      * ``score_vector`` is ``{category: float}`` derived from the
+        payload's ``categories`` array, restricted to *categories*
+        and clamped to [0.0, 1.0]. When validation fails or
+        extraction fails, an all-zero vector is returned.
+    """
+    zero_vector = {c: 0.0 for c in categories}
+    parsed = extract_json_object(raw_text)
+    if parsed is None:
+        partial = _extract_partial_vector(raw_text, categories)
+        rescue_vector = partial if any(v > 0.0 for v in partial.values()) else zero_vector
+        return None, ["invalid_json"], rescue_vector
+
+    errors = validate_multilabel_payload(parsed, categories)
+    vector = _vector_from_payload(parsed, categories)
+    return parsed, errors, vector
+
+
+# def signals_fallback_vector(signals: list[str], categories: list[str]) -> dict[str, float]:
+#     vector = {c: 0.0 for c in categories}
+#     for signal in signals:
+#         mapped = SIGNAL_CATEGORY_MAP.get(signal)
+#         if mapped and mapped in vector:
+#             current = vector[mapped]
+#             vector[mapped] = min(0.90, current + 0.50 * (1.0 - current))
+#     return vector
+
+
+def _vector_from_payload(
+    payload: dict[str, Any],
+    categories: list[str],
+) -> dict[str, float]:
+    """Build a clean {category: score} dict from a validated payload.
+
+    Tries exact match first, then case-insensitive fallback so minor
+    capitalisation differences from the model do not zero out the vector.
+    """
+    vector: dict[str, float] = {c: 0.0 for c in categories}
+    lower_map = {c.lower(): c for c in categories}
+    for entry in payload.get("categories", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not isinstance(name, str):
+            continue
+        canonical = name if name in vector else lower_map.get(name.lower())
+        if canonical is None:
+            continue
+        score = _coerce_score(entry.get("score"))
+        if score is not None:
+            vector[canonical] = score
+    return vector
+
+
+# Aggregation helper that re-exports the one from acf_chunker so callers don't need to depend on that module directly.
+def aggregate_chunk_vectors(
+    chunk_vectors: list[dict[str, float] | None],
+    categories: list[str],
+    aggregation: str = "max",
+) -> dict[str, float]:
+    """Combine per-chunk vectors into a final per-diff vector.
+
+    Thin wrapper that imports :func:`acf_chunker.aggregate_chunk_classifications`
+    so callers only need to depend on this module.
+    """
+    from acf_chunker import aggregate_chunk_classifications  # local import
+
+    return aggregate_chunk_classifications(chunk_vectors, categories, aggregation)
+
+
+# Allowed change types for the "change_type" field in the primary classification output.
+ALLOWED_CHANGE_TYPES = {
+    "addition",
+    "modification",
+    "deletion",
+    "refactor",
+    "formatting",
+    "metadata",
+    "other",
+}
+
+# Primary classification parsing and validation, including confidence gating and fallback construction.
 def build_fallback_primary(raw_text: str, fallback_category: str) -> dict[str, Any]:
     return {
         "category": fallback_category,
@@ -67,9 +311,9 @@ def build_fallback_primary(raw_text: str, fallback_category: str) -> dict[str, A
         "raw": raw_text,
     }
 
-
+# Validation and confidence gating for the primary classification output.
 def validate_primary_payload(payload: dict[str, Any], categories: list[str]) -> list[str]:
-    errors = []
+    errors: list[str] = []
     if payload.get("category") not in categories:
         errors.append("category_missing_or_invalid")
     if payload.get("change_type") not in ALLOWED_CHANGE_TYPES:
@@ -91,7 +335,7 @@ def validate_primary_payload(payload: dict[str, Any], categories: list[str]) -> 
         errors.append("category_confidences_invalid")
     return errors
 
-
+# Confidence gating for the primary classification output, with fallback to a default category when confidence is too low.
 def apply_confidence_gate(
     parsed: dict[str, Any],
     fallback_category: str,
@@ -121,7 +365,7 @@ def apply_confidence_gate(
 
     return parsed
 
-
+# Normalization of category confidence vectors to ensure they sum to 1.0, and removal of invalid entries.
 def normalize_category_confidences(
     parsed: dict[str, Any],
     categories: list[str],
@@ -149,7 +393,7 @@ def normalize_category_confidences(
     parsed["category_confidences"] = cleaned
     return parsed
 
-
+# Main entry point for parsing the primary classification response, including JSON extraction, validation, confidence gating, and fallback construction.
 def parse_primary_response(
     raw_text: str,
     categories: list[str],
@@ -170,11 +414,11 @@ def parse_primary_response(
     )
     return parsed, []
 
-
+# Build a category confidence vector from the parsed primary classification output, using the "category_confidences" field if present, or falling back to a heuristic based on signals.
 def build_category_confidences(
     categories: list[str],
     parsed: dict[str, Any] | None,
-    signals: list[str],
+    # signals: list[str],
 ) -> dict[str, float]:
     if not categories:
         return {}
@@ -209,10 +453,10 @@ def build_category_confidences(
         remaining = 1.0
 
     weights: dict[str, float] = {cat: 1.0 for cat in categories if cat != category}
-    for signal in signals:
-        mapped = SIGNAL_CATEGORY_MAP.get(signal)
-        if mapped in weights:
-            weights[mapped] += 2.0
+    # for signal in signals:
+    #     mapped = SIGNAL_CATEGORY_MAP.get(signal)
+    #     if mapped in weights:
+    #         weights[mapped] += 2.0
 
     total_weight = sum(weights.values())
     if total_weight <= 0:

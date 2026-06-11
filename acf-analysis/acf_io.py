@@ -32,10 +32,12 @@ def load_ollama_api_key(env_path: Path) -> str:
     load_dotenv_file(env_path)
     return os.getenv("OLLAMA_API_KEY", "").strip()
 
-
-def load_label_descriptions(label_file: Path | None) -> tuple[list[str], dict[str, str]]:
+# Load label descriptions and examples from a JSON file, supporting multiple possible shapes for flexibility.
+def load_label_descriptions(
+    label_file: Path | None,
+) -> tuple[list[str], dict[str, str], dict[str, str]]:
     if not label_file or not label_file.exists():
-        return [], {}
+        return [], {}, {}
     data = json.loads(label_file.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("Label descriptions must be a JSON object with a 'categories' list")
@@ -45,6 +47,7 @@ def load_label_descriptions(label_file: Path | None) -> tuple[list[str], dict[st
 
     categories: list[str] = []
     descriptions: dict[str, str] = {}
+    examples: dict[str, str] = {}
     for item in raw_categories:
         if not isinstance(item, dict):
             continue
@@ -56,9 +59,20 @@ def load_label_descriptions(label_file: Path | None) -> tuple[list[str], dict[st
         description = item.get("description")
         if isinstance(description, str) and description.strip():
             descriptions[cleaned_name] = description.strip()
-    return categories, descriptions
+        # Support both "examples" (array, preferred) and "example" (string).
+        examples_list = item.get("examples")
+        example_str = item.get("example")
+        if isinstance(examples_list, list):
+            parts = [e.strip() for e in examples_list if isinstance(e, str) and e.strip()]
+            if parts:
+                examples[cleaned_name] = " | ".join(
+                    f"Ex.{i + 1}: {p}" for i, p in enumerate(parts)
+                )
+        elif isinstance(example_str, str) and example_str.strip():
+            examples[cleaned_name] = example_str.strip()
+    return categories, descriptions, examples
 
-
+# Load Category and fallback summary descriptions from a JSON file, supporting multiple possible shapes for flexibility.
 def load_categories(categories_csv: str | None, default_categories: list[str] | None = None) -> list[str]:
     fallback_categories = default_categories or DEFAULT_CATEGORIES
     if categories_csv:
@@ -66,7 +80,7 @@ def load_categories(categories_csv: str | None, default_categories: list[str] | 
         return parsed or fallback_categories
     return fallback_categories
 
-
+# Load diffs from an ACF JSON file
 def load_diffs_from_acf_data(data: Any) -> list[dict[str, Any]]:
     if isinstance(data, dict) and "acf_commits" in data:
         diffs: list[dict[str, Any]] = []
@@ -126,8 +140,117 @@ def load_diffs_from_acf_json(json_path: Path) -> list[dict[str, Any]]:
     data = json.loads(json_path.read_text(encoding="utf-8"))
     return load_diffs_from_acf_data(data)
 
+# Repo label extraction from JSONL/JSON rows
+def _repo_label_from_jsonl_row(row: dict[str, Any]) -> str:
+    """Build a '<owner>/<name>' label from a JSONL row's owner/name fields."""
+    owner = row.get("repository_owner") or row.get("owner") or ""
+    name = row.get("repository_name") or row.get("name") or ""
+    if owner and name:
+        return f"{owner}/{name}"
+    return str(name or owner or "")
+
+# Diff text extraction from JSONL rows, supporting multiple possible field names and structures for flexibility.
+def _diff_text_from_jsonl_row(row: dict[str, Any]) -> str:
+    """Extract the patch text from a JSONL row, tolerating a few field names."""
+    diff_obj = row.get("diff")
+    if isinstance(diff_obj, dict):
+        patch = diff_obj.get("patch")
+        if isinstance(patch, str) and patch:
+            return patch
+    # Fallbacks for alternative JSONL shapes.
+    for key in ("patch", "diff_text", "patch_text"):
+        value = row.get(key)
+        if isinstance(value, str) and value:
+            return value
+    added = row.get("added_lines") or (diff_obj or {}).get("added_lines")
+    removed = row.get("removed_lines") or (diff_obj or {}).get("removed_lines")
+    if isinstance(added, list) or isinstance(removed, list):
+        rendered: list[str] = []
+        for line in removed or []:
+            rendered.append(f"-{line}")
+        for line in added or []:
+            rendered.append(f"+{line}")
+        if rendered:
+            return "\n".join(rendered)
+    return ""
+
+# Main diff loading function that supports both ACF JSON and JSONL formats, auto-detecting based on file extension
+def load_diffs_from_jsonl(jsonl_path: Path) -> list[dict[str, Any]]:
+    """Read a JSONL file (one diff record per line) into canonical diff dicts.
+
+    Each row is expected to have at minimum a ``diff`` sub-object with
+    ``filename``/``patch`` fields, plus a commit identifier (``head_sha``
+    or ``content_commit_sha``). Rows that fail to parse are skipped with
+    no exception so a single malformed line doesn't abort the run.
+    """
+    diffs: list[dict[str, Any]] = []
+    repo_label = ""
+    for line_number, raw_line in enumerate(jsonl_path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        if not repo_label:
+            repo_label = _repo_label_from_jsonl_row(row)
+
+        diff_obj = row.get("diff") if isinstance(row.get("diff"), dict) else {}
+        filename = (
+            diff_obj.get("filename")
+            or row.get("file_path")
+            or row.get("filename")
+            or ""
+        )
+        diff_text = _diff_text_from_jsonl_row(row)
+        if not diff_text:
+            # Skip rows with no patchable content (e.g. pure deletions / empty).
+            continue
+
+        commit_hash = (
+            row.get("head_sha")
+            or row.get("content_commit_sha")
+            or row.get("commit_hash")
+            or row.get("hash")
+            or ""
+        )
+        # Build a stable diff_id even if the commit hash is missing.
+        diff_id = str(
+            row.get("diff_id")
+            or f"{commit_hash or 'jsonl'}:{filename}:{line_number}"
+        )
+
+        diffs.append(
+            {
+                "diff_id": diff_id,
+                "commit_hash": str(commit_hash),
+                "commit_message": str(row.get("commit_message", "")),
+                "timestamp": str(row.get("timestamp", "")),
+                "filename": str(filename),
+                "diff_text": diff_text,
+                "repo": _repo_label_from_jsonl_row(row),
+                "base_sha": row.get("base_sha", ""),
+                "head_sha": row.get("head_sha", ""),
+                "compare_url": row.get("compare_html_url", ""),
+            }
+        )
+    # Attach the first-seen repo label so the output path uses it.
+    if diffs and not diffs[0].get("repo"):
+        diffs[0]["repo"] = repo_label
+    return diffs
+
 
 def load_repo_diffs(json_path: Path) -> tuple[str, list[dict[str, Any]]]:
+    # JSONL files contain one diff record per line and use a different
+    # schema (repository_owner / diff.patch) than the ACF JSON shape.
+    if json_path.suffix.lower() == ".jsonl":
+        diffs = load_diffs_from_jsonl(json_path)
+        repo_label = diffs[0].get("repo", "") if diffs else json_path.stem
+        return repo_label, diffs
+
     data = json.loads(json_path.read_text(encoding="utf-8"))
     repo_label = ""
     if isinstance(data, dict):
