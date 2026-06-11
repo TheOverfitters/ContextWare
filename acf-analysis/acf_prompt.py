@@ -142,6 +142,14 @@ Rules:
      (both added '+' and removed '-'). A diff that only removes content
      (e.g. deleting a deprecated model from a list) must still receive a
      non-zero score for the category that content belongs to.
+     PURE-DELETION DIFFS ARE NOT EXEMPT: when EVERY changed line starts with
+     '-' (a section, table, command list, or code block being removed), you
+     MUST classify by the TOPIC of the removed content exactly as if it were
+     being added, and the best-matching category MUST score >=0.60. Removing
+     a slash-command/commands table is still Build and Run or AI Integration;
+     removing an architecture section is still Architecture; and so on.
+     "not applicable" / all-zero is WRONG for a deletion that has real
+     content -- the content still has a topic.
   5. A non-empty diff is ALWAYS an intentional edit to a project-guidance
      file, so at least ONE category MUST apply. Classify by the TOPIC of the
      changed prose, NOT by whether it merely "looks like documentation".
@@ -155,14 +163,17 @@ Rules:
        - coding style, naming, type-safety, language idioms,
          API-usage patterns, data-model rules ........... Impl. Details
        - which AI model to use, agent role/behavior, MCP,
-         tool-use or CLAUDE.md/AGENTS.md conventions .... AI Integration
+         tool-use or CLAUDE.md/AGENTS.md conventions,
+         slash commands (`/foo`), custom command defs ... AI Integration
        - module boundaries, design patterns, layering ... Architecture
        - build / run / compile commands ................. Build and Run
        - test commands, coverage, test conventions ...... Testing
        - env vars, .env, config files, setup steps ...... Conf.&Env.
        - CI/CD, deployment, release automation .......... DevOps
        - branching, commit, PR/review rules ............. Development Process
-       - links/paths to other docs, changelog, versions . Documentation
+       - links/paths to other docs, cross-references ... Documentation
+       - project intro, purpose, feature list,
+         tech-stack summary ............................. System Overview
   6. The "primary_category" MUST score >=0.60. If the most applicable
      category for a non-empty diff would otherwise score lower, you are
      UNDER-scoring -- raise it into the high band. Use 0.30-0.50 only for
@@ -197,6 +208,13 @@ return all-zeros on changes like these:
   * Diff adds "Use `@Observable` instead of `ObservableObject`" and
     "default agent model: Claude Opus 4.1 (`claude-opus-4-1`)":
       -> Impl. Details = 0.80 (primary), AI Integration = 0.55
+
+  * Diff is a PURE DELETION removing a slash-command table, e.g. every line
+    starts with '-':  "-## Commands", "-| `/setup-dev` | Environment setup |",
+    "-| `/verify-build` | Build configuration |", "-| `/audit-pr` | Review PRs |":
+      -> Build and Run = 0.75 (primary), AI Integration = 0.55,
+         Development Process = 0.40
+      (a removed commands table is still classified by topic, NOT all-zero.)
 
 CATEGORIES (score every one; use descriptions and examples to disambiguate):
 {categories_block}

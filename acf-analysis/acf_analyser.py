@@ -489,17 +489,13 @@ def classify_diff(
 
         parsed, errors, vector = parse_multilabel_response(raw, categories)
 
-        # Track the best result seen across all attempts (initial + retries).
-        # "Best" = highest sum of scores, so that a partial-but-real vector from
-        # an earlier attempt is not thrown away when a later retry produces empty.
+        # Track the best parsed result and vector so we can use them for final aggregation even when retries yield degraded results (e.g. empty or all-zero vector) due to the grammar engine struggling with complex schemas.
         best_parsed = parsed
         best_vector = vector
         best_vector_sum = sum(vector.values())
         any_attempt_parsed = parsed is not None
 
-        # A response whose vector already has a category at/above the flagging
-        # threshold is usable, even if JSON parsing technically failed and was
-        # rescued via partial extraction. Retrying it just wastes time + tokens.
+        
         def _has_usable_signal(v: dict[str, float]) -> bool:
             return any(s >= args.per_category_threshold for s in v.values())
 
@@ -549,26 +545,26 @@ def classify_diff(
 
         chunk_duration = time.time() - chunk_start
         is_zero = not any(v > 0.0 for v in vector.values())
-        # Status semantics:
-        #   ok             - clean parse, no errors
-        #   recovered      - JSON was malformed but partial extraction yielded a
-        #                    usable vector (>= flagging threshold); not retried on purpose
-        #   retried_failed - errors persisted after exhausting retries
-        #   fallback       - errors, no usable vector, no retry left
-        if not errors:
+        # If the model returned an all-zero vector on a chunk that genuinely changed lines, it likely ignored the instructions. 
+        if is_zero and chunk_changed > 0:
+            status = "fallback"
+        # if is_zero and chunk_changed > 0 and retry_attempted:
+        elif not errors:
             status = "ok"
+        # Even when errors are present, the model may have returned a valid vector with some signal (e.g. some categories scored above the flagging threshold) that we can still use, so we consider that a "recovered" outcome rather than a failure.
         elif _has_usable_signal(vector):
             status = "recovered"
+        # When retries were attempted but the model never returned valid JSON or a usable signal, we consider that a "retried_failed" outcome: the retry logic worked as intended to surface a degraded result that we can still use for aggregation, but the final outcome is still a failure since the model did not follow instructions even after retries.
         elif retry_attempted:
             status = "retried_failed"
+        # When the model returned errors and no usable signal, but we did not attempt a retry (either because retries are disabled or because the retry condition is only triggered on certain errors that were not present), we consider that a "fallback" outcome since we will still use the all-zero vector for aggregation but it indicates the model did not follow instructions and we did not even attempt to nudge it with a retry.
         else:
             status = "fallback"
         print(
             f"      chunk {chunk.index + 1}/{chunk.total} | status={status} "
             f"| changed_lines={chunk_changed} | errors={errors or '-'} | elapsed={chunk_duration:.1f}s"
         )
-        # On any malformed-JSON outcome, show head+tail of the raw so we can see
-        # whether the response was truncated (unbalanced braces) or had trailing junk.
+        
         if errors and "invalid_json" in errors:
             flat = raw.replace("\n", " ") if raw else ""
             if not flat:
@@ -609,13 +605,7 @@ def classify_diff(
         aggregation=args.chunk_aggregation,
     )
 
-    # # Apply signals-fallback when the final vector is all-zero AND there are
-    # # extracted signals to use. Two cases warrant this:
-    # #   1. Every chunk failed to parse (no valid JSON at all).
-    # #   2. All chunks returned valid JSON but every score is exactly 0.0 AND
-    # #      the diff has actual changed lines — meaning the model ignored Rule 12.
-    # #      With temperature=0 retrying the same prompt yields the same zeros,
-    # #      so we rescue the result here instead of wasting retry budget.
+    
     all_chunks_failed = not any(cr.get("any_attempt_parsed", False) for cr in chunk_records)
     has_changed_lines = any(
         (line.startswith("+") or line.startswith("-"))
@@ -623,20 +613,55 @@ def classify_diff(
         and not line.startswith("---")
         for line in diff_text.splitlines()
     )
+    fallback_applied = False
     if not any(v > 0.0 for v in final_vector.values()) and (all_chunks_failed or has_changed_lines):
-        # if signals:
-        #     final_vector = signals_fallback_vector(signals, categories)
-        #     print("    [signals-fallback] zero vector replaced using extracted signals")
-        if "Impl. Details" in categories:
-            # Model ignored Rule 12: assign a minimal rescue score so the diff isn't left unclassified.
-            final_vector = {c: 0.0 for c in categories}
-            final_vector["Impl. Details"] = 0.20
-            print("    [signals-fallback] zero vector rescued with Impl. Details default")
+        _changed_lc = "\n".join(
+            line[1:]
+            for line in diff_text.splitlines()
+            if (line.startswith("+") or line.startswith("-"))
+            and not line.startswith("+++") and not line.startswith("---")
+        ).lower()
 
-    # Pick the highest-scoring category as the primary label.
-    # When the vector is genuinely all-zero (no signals, truly empty diff),
-    # default explicitly to "System Overview" rather than relying on dict
-    # insertion order to win the max() tie-break.
+        _fallback_rules = [
+            (r"(?:^|[\s`])/[a-z][\w-]+|slash command|custom command|\bmcp\b|\bagent\b|claude|copilot|\bllm\b", "AI Integration"),
+            (r"pull request|\bpr\b|merge queue|\bcommit\b|\bbranch\b|code review", "Development Process"),
+            (r"\btest|pytest|jest|vitest|coverage", "Testing"),
+            (r"ci/cd|\bci\b|workflow|deploy|release|pipeline", "DevOps"),
+            (r"npm run|cargo build|\bmake\b|compile|build command", "Build and Run"),
+            (r"\.env\b|environment variable|config file|\bsetup\b|\binstall\b", "Conf.&Env."),
+            (r"security|vulnerab|\bauth\b|token|secret", "Security"),
+            (r"performance|latency|cache|optimi", "Performance"),
+            (r"architecture|module|package|layer|design pattern", "Architecture"),
+            (r"readme|changelog|\bdocs?\b|documentation|https?://", "Documentation"),
+        ]
+        fallback_cat = "Impl. Details"
+        for _pat, _cat in _fallback_rules:
+            if _cat in categories and re.search(_pat, _changed_lc):
+                fallback_cat = _cat
+                break
+        if fallback_cat not in categories:
+            fallback_cat = "Impl. Details" if "Impl. Details" in categories else (
+                categories[0] if categories else None
+            )
+        if fallback_cat is not None and fallback_cat in categories:
+            # Assign a minimal rescue score so the diff isn't left unclassified.
+            final_vector = {c: 0.0 for c in categories}
+            final_vector[fallback_cat] = 0.20
+            fallback_applied = True
+            print(f"    [signals-fallback] zero vector rescued with {fallback_cat} default")
+
+
+    if fallback_applied:
+        diff_status = "fallback"
+    else:
+        _status_severity = {"ok": 0, "recovered": 1, "retried_failed": 2, "fallback": 3}
+        diff_status = max(
+            (cr.get("status", "ok") for cr in chunk_records),
+            key=lambda s: _status_severity.get(s, 0),
+            default="ok",
+        )
+
+
     if any(v > 0.0 for v in final_vector.values()):
         primary_category = max(final_vector.items(), key=lambda kv: kv[1])[0]
     else:
@@ -649,10 +674,17 @@ def classify_diff(
         if s >= args.per_category_threshold
     ]
 
-    # Build prefix map using direct pattern matching against diff lines:
-    #   '+' → keyword for this category appears in added ('+') lines
-    #   '-' → keyword appears only in removed ('-') lines
-    #   '~' → model classified it autonomously; no keyword match in either side
+    if not flagged and any(v > 0.0 for v in final_vector.values()):
+        top_category, top_score = max(final_vector.items(), key=lambda kv: kv[1])
+        flagged = [
+            {
+                "category": top_category,
+                "score": top_score,
+                "rationale": rationale_map.get(top_category, ""),
+            }
+        ]
+
+
     _added_text = "\n".join(
         line[1:]
         for line in diff_text.splitlines()
@@ -688,6 +720,7 @@ def classify_diff(
         "commit_message": commit_message,
         "timestamp": diff.get("timestamp", ""),
         "filename": filename,
+        "status": diff_status,
         # "signals": {"added": added_signals, "removed": removed_signals},
         "primary": {
             "model": args.model,
@@ -763,8 +796,7 @@ def _check_context_budget(
 
 
 
-# Validation error code emitted by acf_parsing when the model response
-# does not even include a "categories" list.
+
 MISSING_CATEGORIES_ERROR = "categories_missing_or_not_list"
 
 
@@ -859,9 +891,7 @@ def main() -> None:
         context_size=args.context_size,
     )
 
-    # Derive safe chunk size from the effective context window.
-    # Reserve tokens for the system prompt, the model response, and a small
-    # overhead for metadata / JSON structure.
+
     if effective_ctx is not None:
         system_tokens = len(system_prompt) // 4
         _RESPONSE_BUDGET = args.max_tokens
@@ -944,9 +974,7 @@ def main() -> None:
         else:
             processed_ids = set()
 
-        # Count diffs per (repo, filename) — needed for per-repo progress labels.
-        # All repos live in a single flat diffs list when input is one JSON file,
-        # so we must group by the "repo" field, not just by filename.
+
         repo_fn_totals: dict[str, dict[str, int]] = {}
         for d in diffs:
             r = str(d.get("repo", ""))

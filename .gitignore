@@ -3,3 +3,4 @@ data-manipulation/dataset/dataset.csv
 data-manipulation/dataset/dataset.parquet
 outputs/
 acf-outputs/
+acf-analysis/__pycache__/

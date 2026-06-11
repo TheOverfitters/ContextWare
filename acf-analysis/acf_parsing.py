@@ -92,14 +92,7 @@ def extract_json_object(raw_text: str) -> dict[str, Any] | None:
     inside string literals. When json.loads fails on a balanced snippet,
     attempts JSON repair before moving on.
     """
-    # Pre-clean the model's de-indentation tic: stray all-whitespace quoted
-    # strings glued to the next key, e.g.  "System Overview","     "summary".
-    # These inject an odd number of quotes, which would desync the string-aware
-    # brace scanner below and make it miss the closing brace entirely.
     raw_text = re.sub(r'"\s+"(\w+)"', r'"\1"', raw_text)
-    # Repair a missing array-close before the top-level primary_category key:
-    #   ..."rationale":"x"} , "primary_category"  ->  ..."x"}], "primary_category"
-    # The model sometimes drops the ']' that closes the "categories" array.
     raw_text = re.sub(r'}(\s*,\s*)("primary_category")', r'}]\1\2', raw_text)
 
     start: int | None = None
@@ -145,12 +138,25 @@ def extract_json_object(raw_text: str) -> dict[str, Any] | None:
 
 # Score coercion and validation helpers for multi-label parsing.
 def _coerce_score(value: Any) -> float | None:
-    """Coerce *value* to a float in [0.0, 1.0]; return None on failure."""
+    """Coerce *value* to a float in [0.0, 1.0]; return None on failure.
+
+    Tolerates the model emitting a score as a numeric string (e.g.
+    ``"score": "0.85"`` or ``"0,85"``) instead of a JSON number, which would
+    otherwise be silently dropped to 0.0.
+    """
     if isinstance(value, bool):
         # bool is a subclass of int -- treat explicitly.
         return 1.0 if value else 0.0
     if isinstance(value, (int, float)):
         return max(0.0, min(1.0, float(value)))
+    if isinstance(value, str):
+        # Accept a numeric string, tolerating a comma decimal separator and
+        # surrounding whitespace/quotes the model sometimes leaves in.
+        cleaned = value.strip().strip('"').strip("'").replace(",", ".")
+        try:
+            return max(0.0, min(1.0, float(cleaned)))
+        except ValueError:
+            return None
     return None
 
 
