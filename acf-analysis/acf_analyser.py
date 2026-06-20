@@ -709,8 +709,13 @@ def classify_diff(
     non_zero = [(c, s) for c, s in final_vector.items() if s > 0.0]
     non_zero.sort(key=lambda kv: kv[1], reverse=True)
     categories_line = ", ".join(f"{_cat_prefix(c)}{c}={s:.2f}" for c, s in non_zero) or "-"
+    flagged_line = ", ".join(f"{f['category']}={f['score']:.2f}" for f in flagged) or "-"
+    # Self-contained per-diff line: include the diff identity so it stays
+    # readable when run_multi_model.py interleaves several models' output
+    # (the wrapper already prefixes every line with the model name).
     print(
-        f"    primary={primary_category} | flagged={len(flagged)} | "
+        f"    {filename} | {diff_id} | status={diff_status} | "
+        f"primary={primary_category} | flagged({len(flagged)})={flagged_line} | "
         f"categories({len(non_zero)})={categories_line}"
     )
 

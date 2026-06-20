@@ -17,6 +17,12 @@ OLLAMA_KEY_PATTERN = re.compile(r"ollama_[A-Za-z0-9]+")
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
+# Models for which we've already announced the empty-content -> thinking/reasoning
+# fallback. For reasoning models (e.g. qwen3.5:cloud) this fallback is the *normal*
+# code path and fires on every request, so we log it once per (model, field) at
+# INFO and drop subsequent occurrences to DEBUG to keep multi-model runs readable.
+_THINKING_FALLBACK_SEEN: set[tuple[str, str]] = set()
+
 
 @dataclass
 class OllamaChatResult:
@@ -398,9 +404,14 @@ def call_ollama_chat_completion(
         for alt_key in ("thinking", "reasoning_content", "reasoning", "tool_calls"):
             alt = message.get(alt_key)
             if isinstance(alt, str) and alt.strip():
-                logger.warning(
-                    "EMPTY_CONTENT | message.content is empty; "
-                    "falling back to message.%s (%d chars)",
+                seen_key = (model, alt_key)
+                level = logging.DEBUG if seen_key in _THINKING_FALLBACK_SEEN else logging.INFO
+                _THINKING_FALLBACK_SEEN.add(seen_key)
+                logger.log(
+                    level,
+                    "EMPTY_CONTENT | %s: message.content empty; using message.%s "
+                    "(%d chars). Normal for reasoning models; logged once per model.",
+                    model,
                     alt_key,
                     len(alt),
                 )
@@ -411,8 +422,14 @@ def call_ollama_chat_completion(
                 try:
                     tc_args = alt[0].get("function", {}).get("arguments", "")
                     if tc_args:
-                        logger.warning(
-                            "EMPTY_CONTENT | falling back to tool_calls[0].function.arguments"
+                        seen_key = (model, "tool_calls")
+                        level = logging.DEBUG if seen_key in _THINKING_FALLBACK_SEEN else logging.INFO
+                        _THINKING_FALLBACK_SEEN.add(seen_key)
+                        logger.log(
+                            level,
+                            "EMPTY_CONTENT | %s: using tool_calls[0].function.arguments. "
+                            "Normal for reasoning models; logged once per model.",
+                            model,
                         )
                         content = tc_args
                         break
@@ -420,10 +437,12 @@ def call_ollama_chat_completion(
                     pass
 
     if not content:
-        # Log the full raw response once so the operator can diagnose.
+        # Genuinely problematic: empty content AND no usable fallback field.
+        # Always warn and dump the raw response so the operator can diagnose.
         logger.warning(
-            "EMPTY_CONTENT | message.content is empty and no fallback found. "
+            "EMPTY_CONTENT | %s: message.content is empty and no fallback found. "
             "Full response (first 500 chars): %s",
+            model,
             raw_response[:500],
         )
 
