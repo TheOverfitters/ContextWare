@@ -9,3 +9,4 @@ acf-outputs/
 .vscode
 .env
 output-report/
+golden-standard/gold-sample/
