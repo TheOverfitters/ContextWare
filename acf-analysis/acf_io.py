@@ -72,7 +72,7 @@ def load_label_descriptions(
             examples[cleaned_name] = example_str.strip()
     return categories, descriptions, examples
 
-# Load Category and fallback summary descriptions from a JSON file, supporting multiple possible shapes for flexibility.
+
 def load_categories(categories_csv: str | None, default_categories: list[str] | None = None) -> list[str]:
     fallback_categories = default_categories or DEFAULT_CATEGORIES
     if categories_csv:
@@ -86,7 +86,9 @@ def load_diffs_from_acf_data(data: Any) -> list[dict[str, Any]]:
         diffs: list[dict[str, Any]] = []
         for commit in data.get("acf_commits", []):
             commit_hash = str(commit.get("hash", ""))
-            commit_message = str(commit.get("message", ""))
+            # The ACF json stores the message under "commit_message"; keep
+            # "message" as a fallback for older/alternative shapes.
+            commit_message = str(commit.get("commit_message") or commit.get("message") or "")
             timestamp = str(commit.get("timestamp", ""))
             for entry in commit.get("acf_files", []):
                 patch = entry.get("patch")
@@ -244,8 +246,6 @@ def load_diffs_from_jsonl(jsonl_path: Path) -> list[dict[str, Any]]:
 
 
 def load_repo_diffs(json_path: Path) -> tuple[str, list[dict[str, Any]]]:
-    # JSONL files contain one diff record per line and use a different
-    # schema (repository_owner / diff.patch) than the ACF JSON shape.
     if json_path.suffix.lower() == ".jsonl":
         diffs = load_diffs_from_jsonl(json_path)
         repo_label = diffs[0].get("repo", "") if diffs else json_path.stem

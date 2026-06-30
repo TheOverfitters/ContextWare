@@ -25,8 +25,9 @@ predictions, so annotators are not anchored.
 Outputs (under ``--out-dir``)
 -----------------------------
   * ``gold_sample_blind.csv``   - one row per diff: diff_id, filename,
-    commit_message, changed_lines, and an empty ``labels_gold`` column to fill
-    in (one column holding ALL applicable categories, primary included).
+    commit_url, commit_message, changed_lines, and an empty ``labels_gold``
+    column to fill in (one column holding ALL applicable categories, primary
+    included).
   * ``gold_sample_blind.jsonl`` - same, machine-readable (``labels_gold: []``).
   * ``gold_sample_key.jsonl``   - NOT for annotators: records the gemma label
     set / primary / census flag per diff, plus the RNG seed, for
@@ -34,13 +35,14 @@ Outputs (under ``--out-dir``)
 
 Example
 -------
-    python build_gold_sample.py --size 250 --seed 42
+    python build_gold_sample.py --size 150 --seed 42
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import random
 import sys
@@ -55,7 +57,7 @@ ACF_ANALYSIS_DIR = REPO_ROOT / "acf-analysis"
 sys.path.insert(0, str(ACF_ANALYSIS_DIR))
 from acf_io import load_diffs_from_acf_json  # noqa: E402
 
-DEFAULT_GEMMA_DIR = ACF_ANALYSIS_DIR / "acf-outputs" / "gemma4_31b-cloud"
+DEFAULT_GEMMA_DIR = REPO_ROOT / "acf-outputs" / "gemma4_31b-cloud"
 DEFAULT_DIFFS = REPO_ROOT / "outputs" / "git_history_diffs.json"
 DEFAULT_OUT_DIR = SCRIPT_DIR / "gold-sample"
 
@@ -75,8 +77,8 @@ def parse_args() -> argparse.Namespace:
                    help=f"Output directory, default {DEFAULT_OUT_DIR}.")
     p.add_argument("--threshold", type=float, default=0.5,
                    help="Score >= threshold marks a category as present (default 0.5).")
-    p.add_argument("--size", type=int, default=250,
-                   help="Target number of diffs in the sample (default 250).")
+    p.add_argument("--size", type=int, default=150,
+                   help="Target number of diffs in the sample (default 150).")
     p.add_argument("--census", nargs="*", default=["UI/UX", "Performance"],
                    help="Labels whose every diff is taken in full (default: UI/UX Performance).")
     p.add_argument("--seed", type=int, default=42, help="RNG seed for reproducibility.")
@@ -113,6 +115,23 @@ def label_set(scores: dict[str, float], threshold: float) -> list[str]:
     return sorted(c for c, v in scores.items() if isinstance(v, (int, float)) and v >= threshold)
 
 
+def commit_file_url(repo: str, commit_hash: str, filename: str) -> str:
+    """Link to a commit, anchored on the diff of *filename* only.
+
+    GitHub has no standalone "single file inside a commit" page, but it anchors
+    each file's diff as ``#diff-<sha256(path)>``, so the link opens the commit
+    and jumps straight to the analysed file. If the anchor ever fails to match
+    (e.g. GitHub changes the scheme) it degrades gracefully to the commit top.
+    """
+    if not (repo and commit_hash):
+        return ""
+    url = f"https://github.com/{repo}/commit/{commit_hash}"
+    if filename:
+        anchor = hashlib.sha256(filename.encode("utf-8")).hexdigest()
+        url += f"#diff-{anchor}"
+    return url
+
+
 def write_xlsx_from_csv(csv_path: Path, xlsx_path: Path) -> bool:
     """Render the blind CSV as a real .xlsx so it opens cleanly in Excel.
 
@@ -122,11 +141,17 @@ def write_xlsx_from_csv(csv_path: Path, xlsx_path: Path) -> bool:
     """
     try:
         from openpyxl import Workbook
+        from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
         from openpyxl.styles import Alignment, Font
     except ImportError:
         print("[xlsx] openpyxl not installed; skipping .xlsx "
               "(install with: pip install openpyxl)", file=sys.stderr)
         return False
+
+    # Diff text can carry control characters that are illegal in the XLSX XML;
+    # Excel flags the file as corrupt and "repairs" it. Strip them up front.
+    def clean(value: str) -> str:
+        return ILLEGAL_CHARACTERS_RE.sub("", value) if isinstance(value, str) else value
 
     with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
         rows = list(csv.reader(f))
@@ -143,15 +168,15 @@ def write_xlsx_from_csv(csv_path: Path, xlsx_path: Path) -> bool:
 
     for r_idx, row in enumerate(rows, start=1):
         for c_idx, value in enumerate(row, start=1):
-            cell = ws.cell(row=r_idx, column=c_idx, value=value)
+            cell = ws.cell(row=r_idx, column=c_idx, value=clean(value))
             if r_idx == 1:
                 cell.font = header_font
             else:
-                # changed_lines (4) and commit_message (3) can be long → wrap.
-                cell.alignment = wrap if c_idx in (3, 4) else top
+                # changed_lines (5) and commit_message (4) can be long → wrap.
+                cell.alignment = wrap if c_idx in (4, 5) else top
 
-    # diff_id, filename, commit_message, changed_lines, labels_gold
-    widths = {1: 42, 2: 20, 3: 40, 4: 90, 5: 26}
+    # diff_id, filename, commit_url, commit_message, changed_lines, labels_gold
+    widths = {1: 42, 2: 20, 3: 60, 4: 40, 5: 90, 6: 26}
     for col, width in widths.items():
         ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
 
@@ -294,17 +319,21 @@ def main() -> None:
         key_jsonl.open("w", encoding="utf-8") as fkey,
     ):
         writer = csv.writer(fcsv)
-        writer.writerow(["diff_id", "filename", "commit_message", "changed_lines", "labels_gold"])
+        writer.writerow(["diff_id", "filename", "commit_url", "commit_message", "changed_lines", "labels_gold"])
         for did in selected:
             d = src[did]
             changed = cleaned_changed_lines(d.get("diff_text", ""))
             filename = d.get("filename", "")
             commit_message = (d.get("commit_message", "") or "").strip()
+            repo = (d.get("repo", "") or "").strip()
+            commit_hash = (d.get("commit_hash", "") or "").strip()
+            commit_url = commit_file_url(repo, commit_hash, filename)
             # Blind sheet: labels_gold is intentionally empty for the annotator.
-            writer.writerow([did, filename, commit_message, changed, ""])
+            writer.writerow([did, filename, commit_url, commit_message, changed, ""])
             fjsonl.write(json.dumps({
                 "diff_id": did,
                 "filename": filename,
+                "commit_url": commit_url,
                 "commit_message": commit_message,
                 "changed_lines": changed,
                 "labels_gold": [],
