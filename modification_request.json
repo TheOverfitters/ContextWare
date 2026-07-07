@@ -1,0 +1,73 @@
+{
+  "_note": "Taxonomy of the REASON behind a modification (the 'why'), per ISO/IEC/IEEE 14764:2022 §3.1 and §8.2, Figure 1 'Modification request'. This axis is ORTHOGONAL to the ACF topic categories in categories.json: a Modification Request (MR) is first classified as a Correction or an Enhancement (parent class), then assigned a maintenance type (leaf). Because 'adaptive' is DUAL-PARENTED in Figure 1 (Note 5 to §3.1.8), it is split here into TWO distinct classification targets — 'adaptive (enhancement)' and 'adaptive (correction)' — so the model has an unambiguous label for each case; both carry base_type='adaptive' to be recombined into a single 'adaptive' type for reporting. Parent mapping is therefore deterministic from the (already-split) leaf: corrective/preventive/'adaptive (correction)' -> Correction; additive/perfective/'adaptive (enhancement)' -> Enhancement.",
+  "maintenance_classes": [
+    {
+      "name": "Correction",
+      "description": "A change that addresses and implements problem resolutions to recover gaps and make the software operational enough to meet its ALREADY DEFINED requirements (ISO/IEC/IEEE 14764:2022 §3.1.3). The software is being repaired against requirements that already exist. Look for: bug fixes, defect repairs, hardening against latent faults, hotfixes. Contains the leaf types 'corrective', 'preventive' and 'adaptive (correction)' — the latter when the software must be adapted to an environment that has ALREADY changed (Note 5 to §3.1.8). NOT this if: the change implements a NEW or CHANGED requirement rather than repairing existing behavior (-> Enhancement). An enhancement is never a correction.",
+      "leaf_types": ["corrective", "preventive", "adaptive (correction)"]
+    },
+    {
+      "name": "Enhancement",
+      "description": "A software change that addresses and implements a NEW requirement (ISO/IEC/IEEE 14764:2022 §3.1.7). It is not a repair of a defect against existing requirements. Look for: new features, adaptation to an evolving/changing environment, improvements to existing attributes (performance, maintainability, UX). Contains the leaf types 'adaptive (enhancement)', 'additive' and 'perfective' — 'adaptive (enhancement)' when the software is adapted to an evolving or changing environment (Note 5 to §3.1.8). NOT this if: the change fixes a discovered problem or a latent fault against requirements that already exist (-> Correction).",
+      "leaf_types": ["adaptive (enhancement)", "additive", "perfective"]
+    }
+  ],
+  "maintenance_types": [
+    {
+      "name": "corrective",
+      "class": "Correction",
+      "description": "Modification of a software product performed after delivery to correct DISCOVERED problems; the modification repairs the software product to satisfy defined system requirements (ISO/IEC/IEEE 14764:2022 §3.1.4, §8.2). Corrective maintenance addresses errors that have already manifested. Look for: bug fixes, repairing behavior that violates existing requirements, crash/error corrections, and emergency maintenance (§3.1.5) — an unscheduled fix performed to temporarily keep a system operational pending a full corrective release. NOT this if: the fault has NOT yet occurred in the live system and the change pre-empts a latent defect (-> preventive). NOT this if: the change implements new or changed requirements rather than repairing existing ones (-> adaptive, additive, perfective).",
+      "examples": [
+        "fix: correct off-by-one that returned the wrong record when the result set had a single row, restoring documented getUser() behavior",
+        "Hotfix: patch startup crash when the config file is missing (emergency fix, pending a full corrective release)."
+      ]
+    },
+    {
+      "name": "preventive",
+      "class": "Correction",
+      "description": "Modification of a software product after delivery to correct LATENT faults in the software product BEFORE they occur in the live system (ISO/IEC/IEEE 14764:2022 §3.1.10, §8.2). The defect has not yet been triggered; the change is made proactively to prevent a future failure. Look for: fixing potential/latent defects, hardening against future failures, closing edge cases that could break but have not yet. NOT this if: the problem has already manifested in operation (-> corrective). NOT this if: the change improves an attribute (performance, readability) with no underlying latent fault (-> perfective).",
+      "examples": [
+        "Add bounds checks to the buffer handler to eliminate a latent overflow that has not yet been hit in production.",
+        "Guard date parsing against a leap-year edge case that would fail on Feb 29 before it ever triggers."
+      ]
+    },
+    {
+      "name": "adaptive (enhancement)",
+      "base_type": "adaptive",
+      "class": "Enhancement",
+      "description": "Adaptive maintenance requested from an ENHANCEMENT MR (ISO/IEC/IEEE 14764:2022 §3.1.1, §8.2; Note 5 to §3.1.8): modification performed after delivery to keep the software usable in an EVOLVING or CHANGING environment, or to make it operate in a NEW/different environment on which it was not initially intended to run. The environment change is anticipated or forward-looking — the software is adapted proactively as the target environment evolves, which constitutes a new requirement. Look for: preparing for an upcoming runtime/OS/library version, porting to a new platform or environment the software did not previously target, adapting ahead of an announced external interface change. NOT this if: the environment has ALREADY changed and the software is now broken/incompatible and must be repaired to restore usability (-> adaptive (correction)). NOT this if: the change adds brand-new functionality unrelated to an environment change (-> additive).",
+      "examples": [
+        "feat: add a Postgres 16 driver path so the app is ready to run on the upcoming database upgrade.",
+        "Port the storage layer to also support the new cloud environment we plan to deploy to."
+      ]
+    },
+    {
+      "name": "adaptive (correction)",
+      "base_type": "adaptive",
+      "class": "Correction",
+      "description": "Adaptive maintenance requested from a CORRECTION MR (ISO/IEC/IEEE 14764:2022 §3.1.1, §8.2; Note 5 to §3.1.8): modification performed after delivery to adapt the software to an environment that has ALREADY changed. The external change (OS/database/library upgrade, changed external interface) has already happened and the software no longer works as required, so it is repaired to restore usability against its existing requirement of operating in that environment. The trigger is reactive — something in the environment broke compatibility. Look for: fixing calls to an API/library that was already upgraded or deprecated, restoring compatibility after a runtime/OS bump that already occurred, repairing an integration broken by a third-party change. NOT this if: the environment change is anticipated/proactive rather than already in effect (-> adaptive (enhancement)). NOT this if: the defect is in the software's own logic rather than driven by an environment change (-> corrective, preventive).",
+      "examples": [
+        "fix: update deprecated crypto API calls that broke after the Node 20 upgrade already rolled out.",
+        "Restore PostgreSQL connectivity after the server was upgraded to 16 and the old driver stopped working."
+      ]
+    },
+    {
+      "name": "additive",
+      "class": "Enhancement",
+      "description": "Modification of a software product performed after delivery to ADD functionality or features to enhance the usage of the product (ISO/IEC/IEEE 14764:2022 §3.1.2, §8.2). It is distinguished from perfective in that relatively large additions of new code are made to the existing software rather than refining what already exists. Look for: new features, new functions/capabilities, sizable new code that extends the product's usage. NOT this if: little or no new code is added and the change refines or improves existing behavior/attributes (-> perfective). NOT this if: the addition exists only to accommodate an external environment change (-> adaptive).",
+      "examples": [
+        "feat: add CSV export option to the reports dashboard.",
+        "Implement multi-factor authentication as a new login method."
+      ]
+    },
+    {
+      "name": "perfective",
+      "class": "Enhancement",
+      "description": "Modification of a software product to provide enhancements for users, improvements of information for users, and changes to improve software performance, maintainability or other software attributes (ISO/IEC/IEEE 14764:2022 §3.1.9, §8.2). Perfective changes improve the product's performance or maintainability, and can entail new functionality improvements for users or reverse engineering to create documentable functionality. Little if any large new capability is added; the focus is refining what exists. Look for: refactoring, performance/maintainability improvements, UX or user-information improvements to existing features, reverse engineering for documentation. NOT this if: large new functionality is added (-> additive). NOT this if: it corrects a discovered or latent fault (-> corrective, preventive).",
+      "examples": [
+        "refactor: simplify the payment module and reduce cyclomatic complexity; no behavior change.",
+        "Improve perceived performance by lazy-loading dashboard images."
+      ]
+    }
+  ]
+}

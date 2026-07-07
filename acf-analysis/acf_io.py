@@ -73,6 +73,105 @@ def load_label_descriptions(
     return categories, descriptions, examples
 
 
+# Load the maintenance-type taxonomy (the "why" of a change) from
+# modification_request.json. This axis is ORTHOGONAL to the ACF categories:
+# it captures the REASON for the modification per ISO/IEC/IEEE 14764:2022
+# (corrective / preventive / adaptive / additive / perfective), with the
+# dual-parented "adaptive" split into two explicit leaf targets.
+def load_maintenance_descriptions(
+    mr_file: Path | None,
+) -> dict[str, Any]:
+    """Parse modification_request.json into prompt-ready structures.
+
+    Returns a dict with:
+      * ``types``            -- ordered list of leaf-type names (the labels).
+      * ``descriptions``     -- {leaf_name: description}.
+      * ``examples``         -- {leaf_name: "Ex.1: ... | Ex.2: ..."}.
+      * ``leaf_to_class``    -- {leaf_name: "Correction"|"Enhancement"}.
+      * ``leaf_to_base``     -- {leaf_name: base_type} (collapses the two
+                                "adaptive (...)" leaves back to "adaptive").
+      * ``classes``          -- ordered list of parent-class names.
+      * ``class_descriptions`` -- {class_name: description}.
+
+    Every mapping is empty when the file is missing so callers can fall back
+    to the defaults defined in acf_prompt.
+    """
+    empty: dict[str, Any] = {
+        "types": [],
+        "descriptions": {},
+        "examples": {},
+        "leaf_to_class": {},
+        "leaf_to_base": {},
+        "classes": [],
+        "class_descriptions": {},
+    }
+    if not mr_file or not mr_file.exists():
+        return empty
+    data = json.loads(mr_file.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("modification_request.json must be a JSON object")
+
+    def _first_class(value: Any) -> str:
+        # ``class`` is a string after the adaptive split, but tolerate a list.
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, list) and value:
+            first = value[0]
+            return first.strip() if isinstance(first, str) else ""
+        return ""
+
+    types: list[str] = []
+    descriptions: dict[str, str] = {}
+    examples: dict[str, str] = {}
+    leaf_to_class: dict[str, str] = {}
+    leaf_to_base: dict[str, str] = {}
+    for item in data.get("maintenance_types", []) or []:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        cleaned = name.strip()
+        types.append(cleaned)
+        desc = item.get("description")
+        if isinstance(desc, str) and desc.strip():
+            descriptions[cleaned] = desc.strip()
+        examples_list = item.get("examples")
+        if isinstance(examples_list, list):
+            parts = [e.strip() for e in examples_list if isinstance(e, str) and e.strip()]
+            if parts:
+                examples[cleaned] = " | ".join(
+                    f"Ex.{i + 1}: {p}" for i, p in enumerate(parts)
+                )
+        leaf_to_class[cleaned] = _first_class(item.get("class"))
+        base = item.get("base_type")
+        leaf_to_base[cleaned] = base.strip() if isinstance(base, str) and base.strip() else cleaned
+
+    classes: list[str] = []
+    class_descriptions: dict[str, str] = {}
+    for item in data.get("maintenance_classes", []) or []:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        cleaned = name.strip()
+        classes.append(cleaned)
+        desc = item.get("description")
+        if isinstance(desc, str) and desc.strip():
+            class_descriptions[cleaned] = desc.strip()
+
+    return {
+        "types": types,
+        "descriptions": descriptions,
+        "examples": examples,
+        "leaf_to_class": leaf_to_class,
+        "leaf_to_base": leaf_to_base,
+        "classes": classes,
+        "class_descriptions": class_descriptions,
+    }
+
+
 def load_categories(categories_csv: str | None, default_categories: list[str] | None = None) -> list[str]:
     fallback_categories = default_categories or DEFAULT_CATEGORIES
     if categories_csv:
@@ -89,7 +188,12 @@ def load_diffs_from_acf_data(data: Any) -> list[dict[str, Any]]:
             # The ACF json stores the message under "commit_message"; keep
             # "message" as a fallback for older/alternative shapes.
             commit_message = str(commit.get("commit_message") or commit.get("message") or "")
-            timestamp = str(commit.get("timestamp", ""))
+            timestamp = str(
+                commit.get("timestamp")
+                or commit.get("commit_date")
+                or commit.get("date")
+                or ""
+            )
             for entry in commit.get("acf_files", []):
                 patch = entry.get("patch")
                 if not patch:
@@ -225,12 +329,22 @@ def load_diffs_from_jsonl(jsonl_path: Path) -> list[dict[str, Any]]:
             or f"{commit_hash or 'jsonl'}:{filename}:{line_number}"
         )
 
+        # Commit date lives under "commit_date" in this JSONL shape; keep a few
+        # fallbacks for alternative feeds. Empty string only if none are present.
+        timestamp = str(
+            row.get("commit_date")
+            or row.get("timestamp")
+            or row.get("committed_date")
+            or row.get("date")
+            or ""
+        )
         diffs.append(
             {
                 "diff_id": diff_id,
                 "commit_hash": str(commit_hash),
                 "commit_message": str(row.get("commit_message", "")),
-                "timestamp": str(row.get("timestamp", "")),
+                "timestamp": timestamp,
+                "commit_author": str(row.get("commit_author", "")),
                 "filename": str(filename),
                 "diff_text": diff_text,
                 "repo": _repo_label_from_jsonl_row(row),

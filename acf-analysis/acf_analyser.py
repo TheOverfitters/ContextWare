@@ -15,6 +15,7 @@ from acf_io import (
     get_run_timestamp,
     load_categories,
     load_label_descriptions,
+    load_maintenance_descriptions,
     load_ollama_api_key,
     load_processed_ids,
     load_repo_diffs,
@@ -22,11 +23,15 @@ from acf_io import (
 )
 from acf_parsing import (
     aggregate_chunk_vectors,
+    maintenance_vector_from_payload,
     parse_multilabel_response,
     # signals_fallback_vector,
 )
 from acf_prompt import (
     DEFAULT_CATEGORIES,
+    DEFAULT_LEAF_TO_BASE,
+    DEFAULT_LEAF_TO_CLASS,
+    DEFAULT_MAINTENANCE_TYPES,
     DEFAULT_MODEL,
     # SIGNAL_CATEGORY_MAP,
     # SIGNAL_PATTERNS,
@@ -81,6 +86,15 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("categories.json"),
         help="Path to categories.json with category names and descriptions.",
+    )
+    parser.add_argument(
+        "--maintenance-descriptions",
+        type=Path,
+        default=Path("modification_request.json"),
+        help=(
+            "Path to modification_request.json with the maintenance-type "
+            "taxonomy (the 'why' axis, ISO/IEC/IEEE 14764)."
+        ),
     )
     parser.add_argument(
         "--categories",
@@ -283,11 +297,17 @@ def _aggregate_validation_errors(chunk_records: list[dict]) -> list[str]:
 
 
 # Pre and post-processing logic are intertwined since the rationale extraction and summary selection logic depend on the per-chunk parsed results and scores.
-def _build_response_schema(categories: list[str]) -> dict:
+def _build_response_schema(categories: list[str], maintenance_types: list[str]) -> dict:
     """Build the JSON schema passed to Ollama as ``format``."""
     return {
         "type": "object",
-        "required": ["categories", "primary_category", "summary"],
+        "required": [
+            "categories",
+            "primary_category",
+            "maintenance_types",
+            "primary_maintenance_type",
+            "summary",
+        ],
         "properties": {
             "categories": {
                 "type": "array",
@@ -302,6 +322,19 @@ def _build_response_schema(categories: list[str]) -> dict:
                 },
             },
             "primary_category": {"type": "string", "enum": categories},
+            "maintenance_types": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["name", "score", "rationale"],
+                    "properties": {
+                        "name":      {"type": "string", "enum": maintenance_types},
+                        "score":     {"type": "number"},
+                        "rationale": {"type": "string"},
+                    },
+                },
+            },
+            "primary_maintenance_type": {"type": "string", "enum": maintenance_types},
             "summary":          {"type": "string"},
         },
     }
@@ -310,15 +343,16 @@ def _build_response_schema(categories: list[str]) -> dict:
 def _extract_rationale_map(
     chunk_records: list[dict],
     categories: list[str],
+    key: str = "categories",
 ) -> dict[str, str]:
-    """For each category, return the rationale from the highest-scoring chunk."""
+    """For each label under *key*, return the rationale from its top-scoring chunk."""
     best_scores: dict[str, float] = {c: -1.0 for c in categories}
     rationale_map: dict[str, str] = {}
     for chunk in chunk_records:
         parsed = chunk.get("parsed")
         if not isinstance(parsed, dict):
             continue
-        for entry in (parsed.get("categories") or []):
+        for entry in (parsed.get(key) or []):
             if not isinstance(entry, dict):
                 continue
             name = entry.get("name")
@@ -400,6 +434,9 @@ def classify_diff(
     diff: dict,
     args: argparse.Namespace,
     categories: list[str],
+    maintenance_types: list[str],
+    leaf_to_class: dict[str, str],
+    leaf_to_base: dict[str, str],
     system_prompt: str,
     api_key: str,
     rate_limiter: SlidingRateLimiter,
@@ -413,6 +450,7 @@ def classify_diff(
     diff_text = str(diff.get("diff_text", ""))
     commit_hash = str(diff.get("commit_hash", ""))
     commit_message = str(diff.get("commit_message", ""))
+    commit_date = str(diff.get("timestamp", ""))
     filename = str(diff.get("filename", ""))
 
     # added_signals, removed_signals = build_signals(diff_text, filename, commit_message)
@@ -430,9 +468,10 @@ def classify_diff(
             and not line.startswith("+++") and not line.startswith("---")
         )
 
-    response_schema = _build_response_schema(categories)
+    response_schema = _build_response_schema(categories, maintenance_types)
     chunk_records: list[dict] = []
     chunk_vectors: list[dict[str, float] | None] = []
+    chunk_maint_vectors: list[dict[str, float] | None] = []
 
     for chunk in plan.chunks:
         chunk_changed = _chunk_changed_lines(chunk.text)
@@ -440,6 +479,7 @@ def classify_diff(
             chunk_text=chunk.text,
             filename=filename,
             commit_message=commit_message,
+            commit_date=commit_date,
             chunk_index=chunk.index,
             chunk_total=chunk.total,
             char_start=chunk.char_start,
@@ -543,6 +583,10 @@ def classify_diff(
         vector = best_vector
         parsed = best_parsed
 
+        # Maintenance-reason axis: read from the same best parsed payload. This
+        # never drives retries (categories do); missing block -> zero vector.
+        maint_vector = maintenance_vector_from_payload(parsed, maintenance_types)
+
         chunk_duration = time.time() - chunk_start
         is_zero = not any(v > 0.0 for v in vector.values())
         # If the model returned an all-zero vector on a chunk that genuinely changed lines, it likely ignored the instructions. 
@@ -594,10 +638,12 @@ def classify_diff(
                 "status": status,
                 "retry_attempted": retry_attempted,
                 "vector": vector,
+                "maint_vector": maint_vector,
                 "any_attempt_parsed": any_attempt_parsed,
             }
         )
         chunk_vectors.append(vector)
+        chunk_maint_vectors.append(maint_vector)
 
     final_vector = aggregate_chunk_vectors(
         chunk_vectors,
@@ -605,7 +651,15 @@ def classify_diff(
         aggregation=args.chunk_aggregation,
     )
 
-    
+    # Aggregate the maintenance-reason axis the same way as categories, then
+    # derive the primary leaf type and its parent class/base type in code.
+    final_maint_vector = aggregate_chunk_vectors(
+        chunk_maint_vectors,
+        maintenance_types,
+        aggregation=args.chunk_aggregation,
+    )
+
+
     all_chunks_failed = not any(cr.get("any_attempt_parsed", False) for cr in chunk_records)
     has_changed_lines = any(
         (line.startswith("+") or line.startswith("-"))
@@ -719,6 +773,37 @@ def classify_diff(
         f"categories({len(non_zero)})={categories_line}"
     )
 
+    # Derive the maintenance-reason result: primary leaf = argmax of the
+    # aggregated vector; parent class and base type follow deterministically
+    # from the taxonomy (the adaptive split makes the parent unambiguous).
+    maint_rationale_map = _extract_rationale_map(
+        chunk_records, maintenance_types, key="maintenance_types"
+    )
+    if any(v > 0.0 for v in final_maint_vector.values()):
+        primary_maintenance_type = max(final_maint_vector.items(), key=lambda kv: kv[1])[0]
+    else:
+        primary_maintenance_type = None
+    maintenance_class = leaf_to_class.get(primary_maintenance_type or "", "")
+    maintenance_base_type = leaf_to_base.get(
+        primary_maintenance_type or "", primary_maintenance_type or ""
+    )
+    maintenance_block = {
+        "primary_maintenance_type": primary_maintenance_type,
+        "maintenance_class": maintenance_class,
+        "maintenance_base_type": maintenance_base_type,
+        "type_scores": final_maint_vector,
+        "rationale": maint_rationale_map.get(primary_maintenance_type or "", ""),
+    }
+
+    # Display base type + class to avoid the redundant "(enhancement) (Enhancement)"
+    # doubling: the leaf name already encodes the class, so show the base type.
+    maint_line = (
+        f"{maintenance_base_type} ({maintenance_class})"
+        if primary_maintenance_type
+        else "-"
+    )
+    print(f"    maintenance | primary={maint_line}")
+
     return {
         "diff_id": diff_id,
         "commit_hash": commit_hash,
@@ -735,6 +820,7 @@ def classify_diff(
         },
         "category_scores": final_vector,
         "flagged_categories": flagged,
+        "maintenance": maintenance_block,
         "chunk_plan": plan.to_metadata(),
         "chunk_records": chunk_records if args.include_chunk_details else [],
     }
@@ -878,16 +964,47 @@ def main() -> None:
         if candidate.exists():
             label_path = candidate
 
+    mr_path = args.maintenance_descriptions
+    if not mr_path.is_absolute() and not mr_path.exists():
+        candidate = repo_root / mr_path
+        if candidate.exists():
+            mr_path = candidate
+
     api_key = load_ollama_api_key(env_path)
     if not api_key:
-        raise RuntimeError(f"Missing OLLAMA_API_KEY in {env_path}")
+        if not env_path.exists():
+            raise RuntimeError(
+                f"Env file not found: {env_path} (resolved from --env-file="
+                f"{args.env_file}). Check the path — e.g. '.contextWare\\.env' "
+                f"is a file inside the .contextWare folder, not '.contextWare.env'."
+            )
+        raise RuntimeError(
+            f"OLLAMA_API_KEY is missing or empty in {env_path}. "
+            f"Add a line 'OLLAMA_API_KEY=<your-key>'."
+        )
 
     label_categories, label_descriptions, label_examples = load_label_descriptions(label_path)
     categories = load_categories(args.categories, label_categories or DEFAULT_CATEGORIES)
     if not categories:
         categories = list(DEFAULT_CATEGORIES)
 
-    system_prompt = get_system_prompt(categories, label_descriptions, label_examples)
+    # Maintenance-reason taxonomy (the "why" axis). Falls back to the built-in
+    # defaults in acf_prompt when modification_request.json is unavailable.
+    maint = load_maintenance_descriptions(mr_path)
+    maintenance_types = maint["types"] or list(DEFAULT_MAINTENANCE_TYPES)
+    leaf_to_class = maint["leaf_to_class"] or dict(DEFAULT_LEAF_TO_CLASS)
+    leaf_to_base = maint["leaf_to_base"] or dict(DEFAULT_LEAF_TO_BASE)
+
+    system_prompt = get_system_prompt(
+        categories,
+        label_descriptions,
+        label_examples,
+        maintenance_types=maintenance_types,
+        maintenance_descriptions=maint["descriptions"],
+        maintenance_examples=maint["examples"],
+        maintenance_classes=maint["classes"] or None,
+        maintenance_class_descriptions=maint["class_descriptions"],
+    )
     effective_ctx = _check_context_budget(
         base_url=args.ollama_base_url,
         api_key=api_key,
@@ -944,6 +1061,7 @@ def main() -> None:
                 chunk_text=str(sample.get("diff_text", ""))[: args.max_diff_chars],
                 filename=str(sample.get("filename", "")),
                 commit_message=str(sample.get("commit_message", "")),
+                commit_date=str(sample.get("timestamp", "")),
                 chunk_index=0,
                 chunk_total=1,
                 char_start=0,
@@ -1024,6 +1142,9 @@ def main() -> None:
                             diff=diff,
                             args=args,
                             categories=categories,
+                            maintenance_types=maintenance_types,
+                            leaf_to_class=leaf_to_class,
+                            leaf_to_base=leaf_to_base,
                             system_prompt=system_prompt,
                             api_key=api_key,
                             rate_limiter=rate_limiter,
@@ -1045,6 +1166,13 @@ def main() -> None:
                             },
                             "category_scores": {c: 0.0 for c in categories},
                             "flagged_categories": [],
+                            "maintenance": {
+                                "primary_maintenance_type": None,
+                                "maintenance_class": "",
+                                "maintenance_base_type": "",
+                                "type_scores": {t: 0.0 for t in maintenance_types},
+                                "rationale": "",
+                            },
                             "chunk_plan": {"truncated": False, "original_chars": 0, "chunk_count": 0},
                             "chunk_records": [],
                         }
@@ -1093,11 +1221,16 @@ def main() -> None:
                     )
 
                 # Eval payload is a flat summary for downstream evaluation.
+                _maint = record.get("maintenance", {}) or {}
                 eval_record = {
                     "diff_id": diff_id,
                     "primary_category": record.get("primary", {}).get("primary_category"),
                     "category_scores": record.get("category_scores", {}),
                     "flagged_categories": record.get("flagged_categories", []),
+                    "primary_maintenance_type": _maint.get("primary_maintenance_type"),
+                    "maintenance_class": _maint.get("maintenance_class", ""),
+                    "maintenance_base_type": _maint.get("maintenance_base_type", ""),
+                    "maintenance_type_scores": _maint.get("type_scores", {}),
                     "chunk_count": record.get("chunk_plan", {}).get("chunk_count", 0),
                 }
 

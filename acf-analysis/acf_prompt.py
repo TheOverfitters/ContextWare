@@ -24,6 +24,44 @@ DEFAULT_CATEGORIES: list[str] = [
 
 DEFAULT_MODEL = "gpt-oss:20b-cloud"
 
+# ---------------------------------------------------------------------------
+# Maintenance-type taxonomy (the "why" of a change), per ISO/IEC/IEEE
+# 14764:2022. This axis is ORTHOGONAL to the ACF categories above: categories
+# describe the TOPIC of the change, maintenance types describe its REASON.
+# The dual-parented "adaptive" is split into two explicit leaf targets so the
+# model has an unambiguous label for each case. The canonical descriptions and
+# examples live in modification_request.json; these constants are the fallback
+# used when that file is unavailable.
+# ---------------------------------------------------------------------------
+DEFAULT_MAINTENANCE_TYPES: list[str] = [
+    "corrective",
+    "preventive",
+    "adaptive (enhancement)",
+    "adaptive (correction)",
+    "additive",
+    "perfective",
+]
+
+# Parent class of each leaf type. Deterministic thanks to the adaptive split.
+DEFAULT_LEAF_TO_CLASS: dict[str, str] = {
+    "corrective": "Correction",
+    "preventive": "Correction",
+    "adaptive (correction)": "Correction",
+    "adaptive (enhancement)": "Enhancement",
+    "additive": "Enhancement",
+    "perfective": "Enhancement",
+}
+
+# Collapse the two adaptive leaves back to a single base type for reporting.
+DEFAULT_LEAF_TO_BASE: dict[str, str] = {
+    "corrective": "corrective",
+    "preventive": "preventive",
+    "adaptive (correction)": "adaptive",
+    "adaptive (enhancement)": "adaptive",
+    "additive": "additive",
+    "perfective": "perfective",
+}
+
 # # Maps keyword signals to the category they most strongly suggest. Used
 # # for both pre-prompt signal extraction and as a soft prior when the LLM
 # # response is missing categories.
@@ -52,11 +90,39 @@ DEFAULT_MODEL = "gpt-oss:20b-cloud"
 SIGNAL_CATEGORY_MAP: dict[str, str] = {}
 
 
+# Render a titled, indented block of "N. name / description / example" entries.
+def _render_label_block(
+    names: list[str],
+    descriptions: dict[str, str],
+    examples: dict[str, str],
+) -> str:
+    lines: list[str] = []
+    for i, name in enumerate(names):
+        lines.append(f"{i + 1}. {name}")
+        desc = descriptions.get(name)
+        if desc:
+            for line in desc.splitlines():
+                lines.append(f"   {line}")
+        ex = examples.get(name)
+        if ex:
+            ex_flat = ex.replace("\n", " ").strip()
+            if len(ex_flat) > 600:
+                ex_flat = ex_flat[:597] + "..."
+            lines.append(f'   Example: "{ex_flat}"')
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
 #  Build the system prompt, which includes the category list and instructions for multi-label classification.
 def get_system_prompt(
     categories: list[str] | None = None,
     descriptions: dict[str, str] | None = None,
     examples: dict[str, str] | None = None,
+    maintenance_types: list[str] | None = None,
+    maintenance_descriptions: dict[str, str] | None = None,
+    maintenance_examples: dict[str, str] | None = None,
+    maintenance_classes: list[str] | None = None,
+    maintenance_class_descriptions: dict[str, str] | None = None,
 ) -> str:
     """Return the static system prompt for the multi-label classifier.
 
@@ -64,27 +130,35 @@ def get_system_prompt(
     has the complete semantic context for each category, including the intro
     prose, 'Look for:' signals, 'NOT this if:' disambiguation clauses, and
     concrete few-shot examples.
+
+    The prompt scores TWO orthogonal axes in a single response:
+      * ACF categories -- the TOPIC of the change (multi-label).
+      * Maintenance types -- the REASON for the change (the "why"), per
+        ISO/IEC/IEEE 14764:2022, embedded from modification_request.json.
     """
     cats = categories or DEFAULT_CATEGORIES
     descs = descriptions or {}
     exs = examples or {}
+    category_block = _render_label_block(cats, descs, exs)
 
-    category_lines: list[str] = []
-    for i, c in enumerate(cats):
-        category_lines.append(f"{i + 1}. {c}")
-        desc = descs.get(c)
-        if desc:
-            for line in desc.splitlines():
-                category_lines.append(f"   {line}")
-        ex = exs.get(c)
-        if ex:
-            ex_flat = ex.replace("\n", " ").strip()
-            if len(ex_flat) > 600:
-                ex_flat = ex_flat[:597] + "..."
-            category_lines.append(f'   Example: "{ex_flat}"')
-        category_lines.append("")
+    maint_types = maintenance_types or DEFAULT_MAINTENANCE_TYPES
+    maint_descs = maintenance_descriptions or {}
+    maint_exs = maintenance_examples or {}
+    maintenance_block = _render_label_block(maint_types, maint_descs, maint_exs)
 
-    category_block = "\n".join(category_lines).rstrip()
+    # Parent-class reference block (Correction vs Enhancement).
+    maint_classes = maintenance_classes or ["Correction", "Enhancement"]
+    class_desc = maintenance_class_descriptions or {}
+    class_lines: list[str] = []
+    for name in maint_classes:
+        class_lines.append(f"- {name}")
+        d = class_desc.get(name)
+        if d:
+            for line in d.splitlines():
+                class_lines.append(f"    {line}")
+    maintenance_class_block = "\n".join(class_lines).rstrip() or "- Correction\n- Enhancement"
+
+    maint_types_csv = ", ".join(f'"{t}"' for t in maint_types)
 
     template = """\
 You are a senior code-diff analyst specializing in agent context files
@@ -114,10 +188,18 @@ distribution and do NOT need to sum to 1.0 -- a diff can legitimately have
 several high scores at once (e.g. a CI YAML change that adds tests is
 both "DevOps" and "Testing").
 
+Additionally, you must classify the REASON for the change on a SECOND,
+independent axis: the maintenance type, per ISO/IEC/IEEE 14764. This is the
+"why" of the change, NOT its topic. Score EACH maintenance type on the same
+0.0-1.0 scale. Unlike categories, the reasons are largely mutually exclusive:
+a change usually has ONE dominant reason, so normally exactly one maintenance
+type scores high (>=0.70) and the rest score low. The maintenance types and
+their parent classes (Correction vs Enhancement) are defined at the bottom.
+
 You will receive, in the user message:
   * "chunk" metadata (index, total, byte range) when the diff was split.
   * The chunk text under "diff".
-  * "filename" and "commit_message" for context.
+  * "filename", "commit_message" and "commit_date" (ISO 8601) for context.
 
 You MUST return exactly one raw JSON object and nothing else -- no
 markdown, no code fences, no commentary. The object MUST have this shape:
@@ -128,6 +210,11 @@ markdown, no code fences, no commentary. The object MUST have this shape:
     ...
   ],
   "primary_category": "<single best category from the list>",
+  "maintenance_types": [
+    {{"name": "<maintenance type>", "score": <float 0.0-1.0>, "rationale": "<<=15 words>"}},
+    ...
+  ],
+  "primary_maintenance_type": "<single best maintenance type from the list>",
   "summary": "<one sentence describing what the diff does>"
 }}
 
@@ -191,6 +278,22 @@ Rules:
       competing categories -- they redirect a score to a better-fitting
       category. They NEVER justify scoring every category 0.0. If a clause
       pushes you away from one category, it is pointing you TOWARD another.
+  12. Include an entry in "maintenance_types" for EVERY maintenance type in the
+      MAINTENANCE TYPES list below ({n_maintenance} of them). Omit nothing; a
+      type with no relevance scores exactly 0.0.
+  13. "primary_maintenance_type" MUST be the maintenance type with the highest
+      score and MUST be one of: {maintenance_types_csv}. It MUST score >=0.60
+      on any non-empty diff -- every real change has a reason.
+  14. The maintenance axis is INDEPENDENT of the category axis: the topic does
+      not dictate the reason. E.g. a change to build commands (Build and Run)
+      may be corrective (fixing a broken command), adaptive (new toolchain),
+      or perfective (cleaner command). Decide the reason from what the change
+      DOES to the software, using the commit_message as a strong signal.
+  15. Disambiguate the two "adaptive" leaves by TIMING: "adaptive (correction)"
+      when the environment has ALREADY changed and broke the software (reactive
+      repair); "adaptive (enhancement)" when adapting proactively to an
+      evolving or new target environment. A pure internal bug fix is
+      "corrective"; a not-yet-triggered latent fix is "preventive".
 
 SCORING EXAMPLES (real diffs; only the non-zero categories are shown -- every
 other category scores 0.0). These show the expected confidence level; do NOT
@@ -218,10 +321,22 @@ return all-zeros on changes like these:
 
 CATEGORIES (score every one; use descriptions and examples to disambiguate):
 {categories_block}
+
+MAINTENANCE PARENT CLASSES (context for the types below; do NOT score these
+directly -- the parent is derived from the chosen type):
+{maintenance_class_block}
+
+MAINTENANCE TYPES (the "why"; score every one; use descriptions and examples
+to disambiguate):
+{maintenance_block}
 """
     return textwrap.dedent(template).format(
         n_categories=len(cats),
         categories_block=category_block,
+        n_maintenance=len(maint_types),
+        maintenance_types_csv=maint_types_csv,
+        maintenance_class_block=maintenance_class_block,
+        maintenance_block=maintenance_block,
     )
 
 
@@ -231,6 +346,7 @@ def build_user_prompt(
     chunk_text: str,
     filename: str,
     commit_message: str,
+    commit_date: str = "",
     chunk_index: int = 0,
     chunk_total: int = 1,
     char_start: int = 0,
@@ -248,6 +364,8 @@ def build_user_prompt(
         },
         "filename": filename or "",
         "commit_message": commit_message or "",
+        # Commit date gives temporal context for the maintenance-reason axis.
+        "commit_date": commit_date or "",
         # "signals": signals,
         "diff": chunk_text,
     }

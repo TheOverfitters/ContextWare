@@ -249,15 +249,18 @@ def parse_multilabel_response(
 def _vector_from_payload(
     payload: dict[str, Any],
     categories: list[str],
+    key: str = "categories",
 ) -> dict[str, float]:
-    """Build a clean {category: score} dict from a validated payload.
+    """Build a clean {name: score} dict from a validated payload.
 
-    Tries exact match first, then case-insensitive fallback so minor
-    capitalisation differences from the model do not zero out the vector.
+    Reads the array under *key* (``"categories"`` for the ACF topic axis,
+    ``"maintenance_types"`` for the maintenance-reason axis). Tries exact
+    match first, then case-insensitive fallback so minor capitalisation
+    differences from the model do not zero out the vector.
     """
     vector: dict[str, float] = {c: 0.0 for c in categories}
     lower_map = {c.lower(): c for c in categories}
-    for entry in payload.get("categories", []) or []:
+    for entry in payload.get(key, []) or []:
         if not isinstance(entry, dict):
             continue
         name = entry.get("name")
@@ -270,6 +273,19 @@ def _vector_from_payload(
         if score is not None:
             vector[canonical] = score
     return vector
+
+
+# Maintenance-reason axis (ISO/IEC/IEEE 14764) parsing. Kept separate from the
+# category retry logic: it reads the same parsed object but never triggers a
+# retry on its own -- when the maintenance block is missing we return zeros.
+def maintenance_vector_from_payload(
+    parsed: dict[str, Any] | None,
+    maintenance_types: list[str],
+) -> dict[str, float]:
+    """Return {maintenance_type: score} from a parsed multi-label payload."""
+    if not isinstance(parsed, dict):
+        return {t: 0.0 for t in maintenance_types}
+    return _vector_from_payload(parsed, maintenance_types, key="maintenance_types")
 
 
 # Aggregation helper that re-exports the one from acf_chunker so callers don't need to depend on that module directly.
