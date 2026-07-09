@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="it" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contextware</title>
+    <link href="/static/output.css" rel="stylesheet">
+    <link rel="icon" type="image/x-icon" href="/static/logo/Logo_ContextWare.ico">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        :root {
+            --brand-dark: #2c0d2a;
+            --brand-blue: #6172c5;
+            --brand-pink: #ed2ea5;
+            --brand-orange: #fa8057;
+            --brand-yellow: #fad009;
+            --text-soft: #f8f4fc;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Manrope", "Segoe UI", sans-serif;
+            color: var(--text-soft);
+            background:
+                radial-gradient(circle at 15% 15%, rgba(237, 46, 165, 0.28), transparent 44%),
+                radial-gradient(circle at 82% 12%, rgba(97, 114, 197, 0.42), transparent 48%),
+                radial-gradient(circle at 78% 88%, rgba(250, 128, 87, 0.32), transparent 46%),
+                linear-gradient(155deg, #190519 0%, var(--brand-dark) 45%, #130715 100%);
+            overflow: auto !important;
+        }
+
+        .glow-orb {
+            position: fixed;
+            width: 26rem;
+            aspect-ratio: 1;
+            border-radius: 999px;
+            filter: blur(70px);
+            opacity: 0.24;
+            pointer-events: none;
+            z-index: 0;
+            animation: drift 16s ease-in-out infinite;
+        }
+
+        .orb-a {
+            top: -8rem;
+            right: -8rem;
+            background: var(--brand-blue);
+        }
+
+        .orb-b {
+            bottom: -10rem;
+            left: -10rem;
+            background: var(--brand-pink);
+            animation-delay: -7s;
+        }
+
+        .app-shell {
+            position: relative;
+            z-index: 1;
+            width: max(1120px, 100% - 8rem);
+            min-height: 100vh;
+            margin: 0 auto;
+            padding: 1.5rem 3.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 3rem;
+        }
+
+        .prompt-section {
+            margin-top: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0.9rem;
+            padding: 1.1rem;
+            border-radius: 28px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(250, 128, 87, 0.08));
+            border: 1px solid rgba(250, 208, 9, 0.25);
+            box-shadow:
+                0 24px 70px rgba(4, 3, 14, 0.58),
+                inset 0 1px 0 rgba(255, 255, 255, 0.26);
+            backdrop-filter: blur(18px);
+            transition: transform 540ms ease, margin-top 540ms ease, padding 540ms ease;
+            transform: translateY(0) scale(1);
+        }
+
+        .prompt-headline {
+            margin: 0;
+            font-size: clamp(1.05rem, 1.6vw, 1.35rem);
+            letter-spacing: 0.02em;
+            font-weight: 700;
+            color: rgba(250, 208, 9, 0.96);
+            text-transform: uppercase;
+        }
+
+        .prompt-controls {
+            display: flex;
+            align-items: center;
+            grid-template-columns: 1fr;
+            gap: 0.8rem;
+        }
+
+        #prompt-input {
+            width: 100%;
+            padding: 1.15rem 1.2rem;
+            border-radius: 20px;
+            border: 1px solid rgba(97, 114, 197, 0.42);
+            background: rgba(22, 11, 35, 0.62);
+            color: var(--text-soft);
+            font-size: 1.03rem;
+            line-height: 1;
+            resize: vertical;
+            outline: none;
+            transition: border-color 180ms ease, box-shadow 180ms ease, min-height 540ms ease;
+        }
+
+        #prompt-input:focus {
+            border-color: rgba(237, 46, 165, 0.7);
+            box-shadow: 0 0 0 4px rgba(237, 46, 165, 0.18);
+        }
+
+        .cta {
+            border: none;
+            border-radius: 16px;
+            padding: 0.92rem 1.3rem;
+            font-weight: 700;
+            letter-spacing: 0.015em;
+            color: #fff;
+            cursor: pointer;
+            background: linear-gradient(112deg, var(--brand-pink), var(--brand-orange) 56%, var(--brand-yellow));
+            box-shadow: 0 18px 32px rgba(237, 46, 165, 0.32);
+            transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+        }
+
+        .cta:hover {
+            transform: translateY(-1px);
+            filter: saturate(1.08);
+            box-shadow: 0 22px 40px rgba(250, 128, 87, 0.4);
+        }
+
+        .cta:active {
+            transform: translateY(1px) scale(0.995);
+        }
+
+        .results {
+            display: flex;
+            gap: 1rem;
+            opacity: 0;
+            transform: translateY(20px) scale(0.985);
+            pointer-events: none;
+            max-height: 0;
+            overflow: hidden;
+            transition: opacity 420ms ease, transform 520ms ease, max-height 620ms ease;
+            justify-content: center;
+            flex-wrap: wrap;
+            column-gap: 8rem;
+        }
+
+        .result-card {
+            display: flex;
+            flex-direction: column;
+            max-height: 60vh;
+            min-height: 45vh;
+            width: 20rem;
+            border-radius: 22px;
+            padding: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            background: linear-gradient(150deg, rgba(97, 114, 197, 0.2), rgba(44, 13, 42, 0.35) 55%, rgba(250, 128, 87, 0.15));
+            box-shadow:
+                0 18px 42px rgba(9, 7, 20, 0.56),
+                inset 0 1px 0 rgba(255, 255, 255, 0.23);
+            backdrop-filter: blur(18px);
+        }
+
+        .result-card.secondary {
+            background: linear-gradient(155deg, rgba(250, 128, 87, 0.2), rgba(44, 13, 42, 0.36) 52%, rgba(237, 46, 165, 0.2));
+            border-color: rgba(250, 208, 9, 0.27);
+        }
+
+        .card-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 0.75rem;
+            margin-bottom: 0.7rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+        }
+
+        .chip {
+            font-size: 0.74rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(250, 208, 9, 0.9);
+        }
+
+        .result-content {
+            flex: 1;
+            overflow: auto;
+            font-size: 0.95rem;
+            color: rgba(248, 244, 252, 0.93);
+        }
+
+        /* SVG Animazioni Bar chart */
+        @keyframes drawCircle {
+            0% { stroke-dasharray: 0, 100; }
+        }
+
+        body.show-results #main-prompt-section {
+            margin-top: 0;
+            padding: 0.95rem;
+            transform: translateY(0rem) scale(1);
+        }
+
+        body.show-results #prompt-input {
+            min-height: 96px;
+        }
+
+        body.show-results .results {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            pointer-events: auto;
+            max-height: 180vh;
+        }
+
+        @media (min-width: 900px) {
+            .prompt-controls {
+                grid-template-columns: 1fr auto;
+            }
+
+            .prompt-controls .cta {
+                min-width: 11.5rem;
+            }
+
+            .results {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @keyframes drift {
+            0% { transform: translate3d(0, 0, 0) scale(1); }
+            50% { transform: translate3d(-12px, 18px, 0) scale(1.05); }
+            100% { transform: translate3d(0, 0, 0) scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <div class="glow-orb orb-a"></div>
+    <div class="glow-orb orb-b"></div>
+
+    <main class="app-shell">
+        <div class="header">
+            <button onclick="showPastAnalyses()" class="cta" style="position: absolute; top: 2.5rem; right: 0.5rem; font-size: 1.2rem;">Analisi Completa</button>
+            <h1>ANALIZZA QUI IL TUO ACF</h1>
+            <img src="/static/logo/Logo_ContextWare.png" alt="Contextware Logo" onclick="window.location.reload()" style="position: absolute; top: -0.5rem; left: -1rem; width: 12rem; cursor: pointer; z-index: 10;">
+        </div>
+        
+        <section id="main-prompt-section" class="prompt-section">
+            <p class="prompt-headline">Link per la repository Github</p>
+            <div class="prompt-controls">
+                <input type="text" id="prompt-input" placeholder="https://github.com/owner/repo" style="width: 100%; padding: 1.15rem 1.2rem; border-radius: 20px; border: 1px solid rgba(97, 114, 197, 0.42); background: rgba(22, 11, 35, 0.62); color: var(--text-soft); font-size: 1.03rem; outline: none;"/>
+                <button onclick="startGeneration()" class="cta" id="analyze-btn">Analizza AGENTS.md / CLAUDE.md</button>
+            </div>
+            <div id="status-message" style="margin-top: 10px; color: var(--brand-yellow); font-weight: bold; text-align: center;"></div>
+        </section>
+
+        <section id="results-container" class="results" style="justify-content: center; column-gap: 2rem; row-gap: 2rem; padding: 0 1.5rem 3.5rem;">
+        </section>
+
+        <section id="past-analyses-view" style="display: none; flex-direction: column; gap: 2rem; align-items: center; margin-top: 2rem; z-index: 2;">
+            <h2 class="prompt-headline" style="font-size: 2rem; text-align: center; color: var(--brand-pink);">Le nostre Analisi Complete</h2>
+            <p style="text-align: center; line-height: 1.6;">In questa sezione potrai visualizzare le grafiche riassuntive delle nostre analisi sul dataset</p>
+            
+            <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%; margin-top: 1rem;">
+                
+                <div class="result-card" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Activation Distribution</h3>
+                    <img src="static/image/activation_distribution.png" alt="Activation Distribution" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card secondary" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Conditional Probability</h3>
+                    <img src="static/image/conditional_probability_matrix.png" alt="Conditional Probability Matrix" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Cooccurrence Matrix</h3>
+                    <img src="static/image/cooccurrence_matrix.png" alt="Cooccurrence Matrix" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card secondary" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Distribution Shift</h3>
+                    <img src="static/image/distribution_shift.png" alt="Distribution Shift" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Primary vs General</h3>
+                    <img src="static/image/primary_vs_general.png" alt="Primary vs General" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card secondary" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Score Distribution</h3>
+                    <img src="static/image/score_distribution.png" alt="Score Distribution" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+            </div>
+
+            <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
+            <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-yellow);">Status Report</h2>
+            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Distribuzione e composizione dello status delle analisi</p>
+
+            <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%;">
+                
+                <div class="result-card" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Status Distribution</h3>
+                    <img src="static/image/status_distribution.png" alt="Status Distribution" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card secondary" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Status Pie Chart</h3>
+                    <img src="static/image/status_pie_chart.png" alt="Status Pie Chart" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+            </div>
+            <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
+            <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-yellow);">Analisi della Manutenzione</h2>
+            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Analisi dettagliata delle discrepanze e conformità della manutenzione</p>
+
+            <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
+            <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-yellow);">Analisi dell'Agreement</h2>
+            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Analisi dettagliata delle discrepanze e conformità dell'agreement</p>
+
+            <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
+            <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-yellow);">Golden Standard</h2>
+            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Analisi dettagliata delle discrepanze e conformità del golden standard</p>
+        </section>
+
+    </main>
+
+    <script>
+        let eventSource;
+
+        function showPastAnalyses() {
+            document.body.classList.remove('show-results');
+            document.getElementById('main-prompt-section').style.display = 'none';
+            document.getElementById('results-container').style.display = 'none';
+            document.getElementById('past-analyses-view').style.display = 'flex';
+        }
+
+        function startGeneration() {
+            const repoUrl = document.getElementById('prompt-input').value;
+            if (!repoUrl) return;
+
+            document.body.classList.add('show-results');
+            const container = document.getElementById('results-container');
+            const statusMsg = document.getElementById('status-message');
+            const btn = document.getElementById('analyze-btn');
+            
+            container.innerHTML = ''; 
+            statusMsg.innerText = "Connessione in corso...";
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+
+            if (eventSource) eventSource.close();
+
+            eventSource = new EventSource(`/stream?repo=${encodeURIComponent(repoUrl)}`);
+
+            eventSource.addEventListener('status', (event) => {
+                const data = JSON.parse(event.data);
+                statusMsg.innerText = data.message;
+            });
+
+            eventSource.addEventListener('stream_error', (event) => {
+                const data = JSON.parse(event.data);
+                statusMsg.innerText = `Errore Backend: ${data.message}`;
+                statusMsg.style.color = "red";
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                eventSource.close();
+            });
+
+            eventSource.addEventListener('complete', (event) => {
+                const data = JSON.parse(event.data);
+                statusMsg.innerText = `Analisi completata su: ${data.filename}`;
+                statusMsg.style.color = "var(--brand-yellow)";
+                
+                if (data.results.length === 0) {
+                    container.innerHTML = `<p style="width: 100%; text-align: center;">Nessuna categoria ha registrato uno score maggiore di 0.</p>`;
+                } else {
+                    data.results.forEach((item, index) => {
+                        const card = document.createElement('article');
+                        card.className = index % 2 === 0 ? 'result-card' : 'result-card secondary';
+                        
+                        const scoreValue = item.score * 100;
+                        const scorePercent = scoreValue.toFixed(1) + '%';
+                        
+                        const ratio = scoreValue / 100;
+
+                        // Interpolazione lineare da Rosa (0%) a Giallo (100%)
+                        const r = Math.round(237 + (250 - 237) * ratio);
+                        const g = Math.round(46 + (208 - 46) * ratio);
+                        const b = Math.round(165 + (9 - 165) * ratio);
+                        
+                        const dynamicColor = `rgb(${r}, ${g}, ${b})`;
+
+                        card.innerHTML = `
+                            <header class="card-head">
+                                <span class="chip">${item.category}</span>
+                                <span style="font-weight: bold; color: #fff;">Score: ${scorePercent}</span>
+                            </header>
+                            
+                            <div style="display: flex; justify-content: center; align-items: center; position: relative; margin: auto;">
+                                <svg viewBox="0 0 36 36" style="width: ${parseFloat(scorePercent) < 50 ? '14rem' : '12rem'}; height: ${parseFloat(scorePercent) < 50 ? '14rem' : '12rem'};">
+                                    <path stroke="rgba(255,255,255,0.15)" stroke-width="3.5" fill="none"
+                                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                    <path stroke="${dynamicColor}" stroke-width="3.5" stroke-dasharray="${scoreValue}, 100" fill="none" stroke-linecap="round"
+                                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                        style="animation: drawCircle 1.5s ease-out forwards;" />
+                                    <text x="18" y="20.8" fill="#fff" font-size="8.5" font-weight="bold" text-anchor="middle">${Math.round(scoreValue)}%</text>
+                                </svg>
+                            </div>
+
+                            ${parseFloat(scorePercent) >= 50 ? `
+                                <div id="action-container-${index}" style="padding-top: 0.8rem; display: flex; align-items: center; justify-content: center; gap: 0.8rem; width: 100%; transition: all 0.3s ease;">
+
+                                    <div id="rationale-${index}" style="display: none; opacity: 1; transition: opacity 0.3s ease; max-height: 150px; overflow-y: auto; font-size: 0.85rem; color: rgba(248, 244, 252, 0.93); line-height: 1.4; text-align: left; flex: 1;">
+                                        <strong style="color: var(--brand-yellow); display: inline-block; margin-bottom: 0.3rem;">Rationale:</strong>
+                                        <div style="display: inline;">
+                                            ${marked.parse(item.rationale || 'Nessuna spiegazione fornita.')}
+                                        </div>
+                                    </div>
+
+                                    <button onclick="toggleRationale('${index}', this)" class="cta result-action" style="margin: 0; font-size: 0.9rem; transition: all 0.3s ease; flex-shrink: 0;">
+                                        Scopri perché
+                                    </button>
+
+                                </div>
+                            ` : ''}
+                        `;
+                        container.appendChild(card);
+                    });
+                }
+                
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                eventSource.close();
+            });
+
+            eventSource.onerror = (err) => {
+                if (eventSource.readyState === EventSource.CLOSED) return; 
+                console.error("Errore di rete SSE:", err);
+                statusMsg.innerText = "Caduta di rete improvvisa.";
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                eventSource.close();
+            };
+        }
+
+        window.toggleRationale = function(id, btnElement) {
+            const rationaleDiv = document.getElementById(`rationale-${id}`);
+            const actionContainer = document.getElementById(`action-container-${id}`);
+            if (!rationaleDiv) return;
+            
+            if (rationaleDiv.style.display === 'none' || rationaleDiv.style.display === '') {
+                rationaleDiv.style.display = 'block';
+                actionContainer.style.borderTop = '1px solid rgba(255,255,255,0.1)';
+                
+                if(btnElement) {
+                    btnElement.innerHTML = "&#10005;"; // X
+                    btnElement.style.padding = "0.25rem 0.55rem"; 
+                    btnElement.style.borderRadius = "50%";
+                }
+
+                setTimeout(() => {
+                    rationaleDiv.style.opacity = '1';
+                }, 50);
+
+            } else {
+                rationaleDiv.style.opacity = '0';
+                
+                setTimeout(() => {
+                    rationaleDiv.style.display = 'none';
+                    actionContainer.style.borderTop = 'none';
+                    
+                    if(btnElement) {
+                        btnElement.innerHTML = "Scopri perché";
+                        btnElement.style.padding = ""; 
+                        btnElement.style.borderRadius = ""; 
+                    }
+                }, 400); 
+            }
+        };
+    </script>
+</body>
+</html>
