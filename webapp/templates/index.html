@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="it" class="dark">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -137,28 +137,34 @@
             transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
         }
 
-        .cta:hover {
+        .cta:hover:not(:disabled) {
             transform: translateY(-1px);
             filter: saturate(1.08);
             box-shadow: 0 22px 40px rgba(250, 128, 87, 0.4);
         }
 
-        .cta:active {
+        .cta:active:not(:disabled) {
             transform: translateY(1px) scale(0.995);
+        }
+
+        /* View Content Styles */
+        #diff-viewer {
+            display: none;
+            flex-direction: column;
+            width: 100%;
+            gap: 2rem;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 420ms ease, transform 520ms ease;
         }
 
         .results {
             display: flex;
             gap: 1rem;
-            opacity: 0;
-            transform: translateY(20px) scale(0.985);
-            pointer-events: none;
-            max-height: 0;
-            overflow: hidden;
-            transition: opacity 420ms ease, transform 520ms ease, max-height 620ms ease;
             justify-content: center;
             flex-wrap: wrap;
-            column-gap: 8rem;
+            column-gap: 3rem;
+            row-gap: 2rem;
         }
 
         .result-card {
@@ -175,11 +181,77 @@
                 0 18px 42px rgba(9, 7, 20, 0.56),
                 inset 0 1px 0 rgba(255, 255, 255, 0.23);
             backdrop-filter: blur(18px);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .result-card.zoomable {
+            cursor: pointer;
+        }
+
+        .result-card:hover {
+            transform: scale(1.05);
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.6);
         }
 
         .result-card.secondary {
             background: linear-gradient(155deg, rgba(250, 128, 87, 0.2), rgba(44, 13, 42, 0.36) 52%, rgba(237, 46, 165, 0.2));
             border-color: rgba(250, 208, 9, 0.27);
+        }
+        
+        #image-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+            cursor: zoom-out;
+            backdrop-filter: blur(15px);
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        #modal-img {
+            max-width: 90vw;
+            max-height: 90vh;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 0 50px rgba(0,0,0,0.8);
+            transition: transform 0.3s ease;
+            cursor: default;
+        }
+
+        #modal-close {
+            position: absolute;
+            top: 2rem;
+            right: 2rem;
+            color: #fff;
+            font-size: 3rem;
+            cursor: pointer;
+            font-weight: bold;
+            z-index: 2001;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            border-radius: 50%;
+            transition: background 0.2s;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        #modal-close:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
 
         .card-head {
@@ -199,14 +271,15 @@
             color: rgba(250, 208, 9, 0.9);
         }
 
-        .result-content {
-            flex: 1;
-            overflow: auto;
-            font-size: 0.95rem;
-            color: rgba(248, 244, 252, 0.93);
+        .maintenance-card {
+            background: linear-gradient(150deg, rgba(97, 114, 197, 0.1), rgba(44, 13, 42, 0.4));
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
+            padding: 1.5rem;
+            width: 100%;
         }
 
-        /* SVG Animazioni Bar chart */
+        /* SVG Bar chart animations */
         @keyframes drawCircle {
             0% { stroke-dasharray: 0, 100; }
         }
@@ -221,11 +294,11 @@
             min-height: 96px;
         }
 
-        body.show-results .results {
+        body.show-results #diff-viewer {
+            display: flex;
             opacity: 1;
             transform: translateY(0) scale(1);
             pointer-events: auto;
-            max-height: 180vh;
         }
 
         @media (min-width: 900px) {
@@ -235,10 +308,6 @@
 
             .prompt-controls .cta {
                 min-width: 11.5rem;
-            }
-
-            .results {
-                grid-template-columns: 1fr 1fr;
             }
         }
 
@@ -255,55 +324,77 @@
 
     <main class="app-shell">
         <div class="header">
-            <button onclick="showPastAnalyses()" class="cta" style="position: absolute; top: 2.5rem; right: 0.5rem; font-size: 1.2rem;">Analisi Completa</button>
-            <h1>ANALIZZA QUI IL TUO ACF</h1>
+            <button onclick="showPastAnalysis()" class="cta" style="position: absolute; top: 2.5rem; right: 0.5rem; font-size: 1.2rem;">Full Analysis</button>
+            <h1>ANALYSE YOUR ACF HERE</h1>
             <img src="/static/logo/Logo_ContextWare.png" alt="Contextware Logo" onclick="window.location.reload()" style="position: absolute; top: -0.5rem; left: -1rem; width: 12rem; cursor: pointer; z-index: 10;">
         </div>
         
         <section id="main-prompt-section" class="prompt-section">
-            <p class="prompt-headline">Link per la repository Github</p>
+            <p class="prompt-headline">GitHub Repository Link</p>
             <div class="prompt-controls">
                 <input type="text" id="prompt-input" placeholder="https://github.com/owner/repo" style="width: 100%; padding: 1.15rem 1.2rem; border-radius: 20px; border: 1px solid rgba(97, 114, 197, 0.42); background: rgba(22, 11, 35, 0.62); color: var(--text-soft); font-size: 1.03rem; outline: none;"/>
-                <button onclick="startGeneration()" class="cta" id="analyze-btn">Analizza AGENTS.md / CLAUDE.md</button>
+                <button onclick="startGeneration()" class="cta" id="analyse-btn">Analyse AGENTS.md / CLAUDE.md</button>
             </div>
             <div id="status-message" style="margin-top: 10px; color: var(--brand-yellow); font-weight: bold; text-align: center;"></div>
+            <button id="multi-model-btn" style="display: none; margin-top: 20px;">
+                Run Multi-Model Validation
+            </button>
+
+            <div id="multi-model-dashboard" style="display: none; gap: 1.5rem; margin-top: 2rem; width: 100%; justify-content: space-around;"></div>
+            </section>
+
+        <section id="diff-viewer">
+            
+            <div style="display: flex; align-items: flex-start; justify-content: space-between; background: rgba(22,11,35,0.6); padding: 1rem 2rem; border-radius: 20px; border: 1px solid rgba(250,208,9,0.3);">
+                <button id="prev-btn" class="cta" onclick="prevDiff()">&#8592; Previous</button>
+                <div style="text-align: center; overflow: hidden;">
+                    <h3 id="diff-id-display" style="color: var(--brand-yellow); margin: 0; font-size: 1.3rem;">Commit: ...</h3>
+                    <p id="diff-msg-display" style="margin: 0.3rem 0 0 0; font-size: 0.95rem; max-width: 500px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.7);"></p>
+                </div>
+                <button id="next-btn" class="cta" onclick="nextDiff()">Next &#8594;</button>
+            </div>
+
+            <div id="results-container" class="results"></div>
+
+            <div class="maintenance-card">
+                <h3 style="color: var(--brand-pink); text-align: center; margin-top: 0; font-size: 1.3rem; border-bottom: 1px solid rgba(255,255,255,0.15); padding-bottom: 0.5rem; text-transform: uppercase;">Software Maintenance</h3>
+                <div id="maint-content" style="display: grid; gap: 2rem; margin-top: 1rem; align-items: start;">
+                    </div>
+            </div>
         </section>
 
-        <section id="results-container" class="results" style="justify-content: center; column-gap: 2rem; row-gap: 2rem; padding: 0 1.5rem 3.5rem;">
-        </section>
-
-        <section id="past-analyses-view" style="display: none; flex-direction: column; gap: 2rem; align-items: center; margin-top: 2rem; z-index: 2;">
-            <h2 class="prompt-headline" style="font-size: 2rem; text-align: center; color: var(--brand-pink);">Le nostre Analisi Complete</h2>
-            <p style="text-align: center; line-height: 1.6;">In questa sezione potrai visualizzare le grafiche riassuntive delle nostre analisi sul dataset</p>
+        <section id="past-analysis-view" style="display: none; flex-direction: column; gap: 2rem; align-items: center; margin-top: 2rem; z-index: 2;">
+            <h2 class="prompt-headline" style="font-size: 2rem; text-align: center; color: var(--brand-pink);">Our Full Analysis</h2>
+            <p style="text-align: center; line-height: 1.6;">In this section, you can view summary graphics of our dataset analysis</p>
             
             <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%; margin-top: 1rem;">
                 
-                <div class="result-card" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                <div class="result-card zoomable" onclick="openModal('static/image/activation_distribution.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
                     <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Activation Distribution</h3>
                     <img src="static/image/activation_distribution.png" alt="Activation Distribution" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
                 </div>
 
-                <div class="result-card secondary" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                <div class="result-card secondary zoomable" onclick="openModal('static/image/conditional_probability_matrix.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
                     <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Conditional Probability</h3>
                     <img src="static/image/conditional_probability_matrix.png" alt="Conditional Probability Matrix" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
                 </div>
 
-                <div class="result-card" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                <div class="result-card zoomable" onclick="openModal('static/image/cooccurrence_matrix.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
                     <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Cooccurrence Matrix</h3>
                     <img src="static/image/cooccurrence_matrix.png" alt="Cooccurrence Matrix" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
                 </div>
 
-                <div class="result-card secondary" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                <div class="result-card secondary zoomable" onclick="openModal('static/image/distribution_shift.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
                     <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Distribution Shift</h3>
                     <img src="static/image/distribution_shift.png" alt="Distribution Shift" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
                 </div>
 
-                <div class="result-card" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                <div class="result-card zoomable" onclick="openModal('static/image/primary_vs_general.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
                     <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Primary vs General</h3>
                     <img src="static/image/primary_vs_general.png" alt="Primary vs General" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
                 </div>
 
-                <div class="result-card secondary" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                <div class="result-card secondary zoomable" onclick="openModal('static/image/score_distribution.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
                     <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Score Distribution</h3>
                     <img src="static/image/score_distribution.png" alt="Score Distribution" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
                 </div>
@@ -311,57 +402,163 @@
 
             <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
             <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-yellow);">Status Report</h2>
-            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Distribuzione e composizione dello status delle analisi</p>
+            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Distribution and composition of analysis status</p>
 
             <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%;">
                 
-                <div class="result-card" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                <div class="result-card zoomable" onclick="openModal('static/image/status_distribution.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
                     <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Status Distribution</h3>
                     <img src="static/image/status_distribution.png" alt="Status Distribution" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
                 </div>
 
-                <div class="result-card secondary" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                <div class="result-card secondary zoomable" onclick="openModal('static/image/status_pie_chart.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
                     <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Status Pie Chart</h3>
                     <img src="static/image/status_pie_chart.png" alt="Status Pie Chart" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
                 </div>
 
             </div>
-            <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
-            <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-yellow);">Analisi della Manutenzione</h2>
-            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Analisi dettagliata delle discrepanze e conformità della manutenzione</p>
+
 
             <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
-            <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-yellow);">Analisi dell'Agreement</h2>
-            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Analisi dettagliata delle discrepanze e conformità dell'agreement</p>
+            <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-yellow);">Maintenance Analysis</h2>
+            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Detailed analysis of maintenance discrepancies and compliance</p>
+            
+            <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%;">
+
+                <div class="result-card zoomable" onclick="openModal('static/image/maintenance_class_distribution.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Cooccurrence Matrix</h3>
+                    <img src="static/image/maintenance_class_distribution.png" alt="Cooccurrence Matrix" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card secondary zoomable" onclick="openModal('static/image/maintenance_lifecycle.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Distribution Shift</h3>
+                    <img src="static/image/maintenance_lifecycle.png" alt="Distribution Shift" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card zoomable" onclick="openModal('static/image/maintenance_score_distribution.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Primary vs General</h3>
+                    <img src="static/image/maintenance_score_distribution.png" alt="Primary vs General" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card secondary zoomable" onclick="openModal('static/image/maintenance_type_distribution.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Score Distribution</h3>
+                    <img src="static/image/maintenance_type_distribution.png" alt="Score Distribution" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+            </div>
+
+
+            <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
+            <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-yellow);">Agreement Analysis</h2>
+            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Detailed analysis of agreement discrepancies and compliance</p>
+            
+            <h3 style="color: var(--brand-pink); font-size: 1.3rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Category Agreement</h3>
+            <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%;">
+
+                <div class="result-card zoomable" onclick="openModal('static/image/agreement/category_agreement_kappa.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Cooccurrence Matrix</h3>
+                    <img src="static/image/agreement/category_agreement_kappa.png" alt="Cooccurrence Matrix" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card secondary zoomable" onclick="openModal('static/image/agreement/category_ambiguity.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Distribution Shift</h3>
+                    <img src="static/image/agreement/category_ambiguity.png" alt="Distribution Shift" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card zoomable" onclick="openModal('static/image/agreement/category_entropy.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Primary vs General</h3>
+                    <img src="static/image/agreement/category_entropy.png" alt="Primary vs General" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+            </div>
+
+                        <h3 style="color: var(--brand-pink); font-size: 1.3rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Maintenance Agreement</h3>
+            <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%;">
+
+                <div class="result-card zoomable" onclick="openModal('static/image/agreement/maintenance_agreement.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Cooccurrence Matrix</h3>
+                    <img src="static/image/agreement/maintenance_agreement.png" alt="Cooccurrence Matrix" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card secondary zoomable" onclick="openModal('static/image/agreement/maintenance_reference.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Distribution Shift</h3>
+                    <img src="static/image/agreement/maintenance_reference.png" alt="Distribution Shift" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card zoomable" onclick="openModal('static/image/agreement/maintenance_type_ambiguity.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Primary vs General</h3>
+                    <img src="static/image/agreement/maintenance_type_ambiguity.png" alt="Primary vs General" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+            </div>
+
+                        <h3 style="color: var(--brand-pink); font-size: 1.3rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Reference Agreement</h3>
+            <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%;">
+
+                <div class="result-card zoomable" onclick="openModal('static/image/agreement/reference_category_kappa.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Cooccurrence Matrix</h3>
+                    <img src="static/image/agreement/reference_category_kappa.png" alt="Cooccurrence Matrix" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card secondary zoomable" onclick="openModal('static/image/agreement/reference_comparison.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Distribution Shift</h3>
+                    <img src="static/image/agreement/reference_comparison.png" alt="Distribution Shift" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card zoomable" onclick="openModal('static/image/agreement/single_label_agreement.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Primary vs General</h3>
+                    <img src="static/image/agreement/single_label_agreement.png" alt="Primary vs General" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+            </div>
+
 
             <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
             <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-yellow);">Golden Standard</h2>
-            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Analisi dettagliata delle discrepanze e conformità del golden standard</p>
+            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Detailed analysis of golden standard discrepancies and compliance</p>
+            
+            <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%;">
+
+
+
+            </div>
         </section>
 
     </main>
 
+    <!-- Image Modal -->
+    <div id="image-modal" onclick="closeModal()">
+        <div id="modal-close" onclick="closeModal()">&times;</div>
+        <img id="modal-img" src="" alt="Full size analysis">
+    </div>
+
     <script>
         let eventSource;
+        let analysedDiffs = [];
+        let currentDiffIndex = 0;
 
-        function showPastAnalyses() {
+        function showPastAnalysis() {
             document.body.classList.remove('show-results');
             document.getElementById('main-prompt-section').style.display = 'none';
-            document.getElementById('results-container').style.display = 'none';
-            document.getElementById('past-analyses-view').style.display = 'flex';
+            document.getElementById('diff-viewer').style.display = 'none';
+            document.getElementById('past-analysis-view').style.display = 'flex';
         }
 
         function startGeneration() {
             const repoUrl = document.getElementById('prompt-input').value;
             if (!repoUrl) return;
 
-            document.body.classList.add('show-results');
-            const container = document.getElementById('results-container');
-            const statusMsg = document.getElementById('status-message');
-            const btn = document.getElementById('analyze-btn');
+            analysedDiffs = [];
+            currentDiffIndex = 0;
             
-            container.innerHTML = ''; 
-            statusMsg.innerText = "Connessione in corso...";
+            document.body.classList.remove('show-results');
+            document.getElementById('diff-viewer').style.display = 'none';
+            
+            const statusMsg = document.getElementById('status-message');
+            const btn = document.getElementById('analyse-btn');
+            
+            statusMsg.innerText = "Connecting...";
+            statusMsg.style.color = "var(--brand-yellow)";
             btn.disabled = true;
             btn.style.opacity = '0.5';
 
@@ -374,9 +571,24 @@
                 statusMsg.innerText = data.message;
             });
 
+            eventSource.addEventListener('diff_result', (event) => {
+                const data = JSON.parse(event.data);
+                analysedDiffs.push(data);
+                
+                // Show the UI when the first result arrives
+                if (analysedDiffs.length === 1) {
+                    document.body.classList.add('show-results');
+                    document.getElementById('diff-viewer').style.display = 'flex';
+                    renderDiff(0);
+                } else {
+                    // Update navigation only, to reflect the new total count
+                    updateNav();
+                }
+            });
+
             eventSource.addEventListener('stream_error', (event) => {
                 const data = JSON.parse(event.data);
-                statusMsg.innerText = `Errore Backend: ${data.message}`;
+                statusMsg.innerText = `Backend Error: ${data.message}`;
                 statusMsg.style.color = "red";
                 btn.disabled = false;
                 btn.style.opacity = '1';
@@ -385,79 +597,139 @@
 
             eventSource.addEventListener('complete', (event) => {
                 const data = JSON.parse(event.data);
-                statusMsg.innerText = `Analisi completata su: ${data.filename}`;
-                statusMsg.style.color = "var(--brand-yellow)";
-                
-                if (data.results.length === 0) {
-                    container.innerHTML = `<p style="width: 100%; text-align: center;">Nessuna categoria ha registrato uno score maggiore di 0.</p>`;
-                } else {
-                    data.results.forEach((item, index) => {
-                        const card = document.createElement('article');
-                        card.className = index % 2 === 0 ? 'result-card' : 'result-card secondary';
-                        
-                        const scoreValue = item.score * 100;
-                        const scorePercent = scoreValue.toFixed(1) + '%';
-                        
-                        const ratio = scoreValue / 100;
-
-                        // Interpolazione lineare da Rosa (0%) a Giallo (100%)
-                        const r = Math.round(237 + (250 - 237) * ratio);
-                        const g = Math.round(46 + (208 - 46) * ratio);
-                        const b = Math.round(165 + (9 - 165) * ratio);
-                        
-                        const dynamicColor = `rgb(${r}, ${g}, ${b})`;
-
-                        card.innerHTML = `
-                            <header class="card-head">
-                                <span class="chip">${item.category}</span>
-                                <span style="font-weight: bold; color: #fff;">Score: ${scorePercent}</span>
-                            </header>
-                            
-                            <div style="display: flex; justify-content: center; align-items: center; position: relative; margin: auto;">
-                                <svg viewBox="0 0 36 36" style="width: ${parseFloat(scorePercent) < 50 ? '14rem' : '12rem'}; height: ${parseFloat(scorePercent) < 50 ? '14rem' : '12rem'};">
-                                    <path stroke="rgba(255,255,255,0.15)" stroke-width="3.5" fill="none"
-                                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                                    <path stroke="${dynamicColor}" stroke-width="3.5" stroke-dasharray="${scoreValue}, 100" fill="none" stroke-linecap="round"
-                                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                                        style="animation: drawCircle 1.5s ease-out forwards;" />
-                                    <text x="18" y="20.8" fill="#fff" font-size="8.5" font-weight="bold" text-anchor="middle">${Math.round(scoreValue)}%</text>
-                                </svg>
-                            </div>
-
-                            ${parseFloat(scorePercent) >= 50 ? `
-                                <div id="action-container-${index}" style="padding-top: 0.8rem; display: flex; align-items: center; justify-content: center; gap: 0.8rem; width: 100%; transition: all 0.3s ease;">
-
-                                    <div id="rationale-${index}" style="display: none; opacity: 1; transition: opacity 0.3s ease; max-height: 150px; overflow-y: auto; font-size: 0.85rem; color: rgba(248, 244, 252, 0.93); line-height: 1.4; text-align: left; flex: 1;">
-                                        <strong style="color: var(--brand-yellow); display: inline-block; margin-bottom: 0.3rem;">Rationale:</strong>
-                                        <div style="display: inline;">
-                                            ${marked.parse(item.rationale || 'Nessuna spiegazione fornita.')}
-                                        </div>
-                                    </div>
-
-                                    <button onclick="toggleRationale('${index}', this)" class="cta result-action" style="margin: 0; font-size: 0.9rem; transition: all 0.3s ease; flex-shrink: 0;">
-                                        Scopri perché
-                                    </button>
-
-                                </div>
-                            ` : ''}
-                        `;
-                        container.appendChild(card);
-                    });
-                }
-                
+                statusMsg.innerText = data.message;
+                statusMsg.style.color = "var(--brand-pink)";
                 btn.disabled = false;
                 btn.style.opacity = '1';
+                
+                // Reveal and style the multi-model validation button
+                const multiBtn = document.getElementById('multi-model-btn');
+                multiBtn.style.display = 'block';
+                multiBtn.style.margin = '20px auto 0 auto';
+                multiBtn.className = 'cta';
+                
                 eventSource.close();
             });
 
             eventSource.onerror = (err) => {
                 if (eventSource.readyState === EventSource.CLOSED) return; 
-                console.error("Errore di rete SSE:", err);
-                statusMsg.innerText = "Caduta di rete improvvisa.";
+                console.error("SSE Network Error:", err);
+                statusMsg.innerText = "Sudden network connection drop.";
+                statusMsg.style.color = "var(--brand-pink)";
                 btn.disabled = false;
                 btn.style.opacity = '1';
                 eventSource.close();
             };
+        }
+
+        function updateNav() {
+            const prevBtn = document.getElementById('prev-btn');
+            const nextBtn = document.getElementById('next-btn');
+            const counter = document.getElementById('diff-id-display');
+            const msg = document.getElementById('diff-msg-display');
+
+            prevBtn.disabled = currentDiffIndex === 0;
+            prevBtn.style.opacity = currentDiffIndex === 0 ? '0.3' : '1';
+            
+            nextBtn.disabled = currentDiffIndex === analysedDiffs.length - 1;
+            nextBtn.style.opacity = currentDiffIndex === analysedDiffs.length - 1 ? '0.3' : '1';
+
+            const current = analysedDiffs[currentDiffIndex];
+            if (current) {
+                counter.innerText = `Commit: ${current.diff_id} (${currentDiffIndex + 1}/${analysedDiffs.length})`;
+                msg.innerText = current.commit_message || 'No message';
+            }
+        }
+
+        function prevDiff() {
+            if (currentDiffIndex > 0) {
+                currentDiffIndex--;
+                renderDiff(currentDiffIndex);
+            }
+        }
+
+        function nextDiff() {
+            if (currentDiffIndex < analysedDiffs.length - 1) {
+                currentDiffIndex++;
+                renderDiff(currentDiffIndex);
+            }
+        }
+
+        function renderDiff(index) {
+            const data = analysedDiffs[index];
+            const container = document.getElementById('results-container');
+            container.innerHTML = '';
+            
+            // Render Categories
+            if (!data.results || data.results.length === 0) {
+                container.innerHTML = `<p style="width: 100%; text-align: center;">No category registered a score greater than 0.</p>`;
+            } else {
+                data.results.forEach((item, i) => {
+                    const card = document.createElement('article');
+                    card.className = i % 2 === 0 ? 'result-card' : 'result-card secondary';
+                    
+                    const scoreValue = item.score * 100;
+                    const scorePercent = scoreValue.toFixed(1) + '%';
+                    
+                    const ratio = scoreValue / 100;
+                    const r = Math.round(237 + (250 - 237) * ratio);
+                    const g = Math.round(46 + (208 - 46) * ratio);
+                    const b = Math.round(165 + (9 - 165) * ratio);
+                    const dynamicColor = `rgb(${r}, ${g}, ${b})`;
+
+                    card.innerHTML = `
+                        <header class="card-head">
+                            <span class="chip">${item.category}</span>
+                            <span style="font-weight: bold; color: #fff;">Score: ${scorePercent}</span>
+                        </header>
+                        
+                        <div style="display: flex; justify-content: center; align-items: center; position: relative; margin: auto;">
+                            <svg viewBox="0 0 36 36" style="width: ${parseFloat(scorePercent) < 50 ? '14rem' : '12rem'}; height: ${parseFloat(scorePercent) < 50 ? '14rem' : '12rem'};">
+                                <path stroke="rgba(255,255,255,0.15)" stroke-width="3.5" fill="none"
+                                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                <path stroke="${dynamicColor}" stroke-width="3.5" stroke-dasharray="${scoreValue}, 100" fill="none" stroke-linecap="round"
+                                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                    style="animation: drawCircle 1.5s ease-out forwards;" />
+                                <text x="18" y="20.8" fill="#fff" font-size="8.5" font-weight="bold" text-anchor="middle">${Math.round(scoreValue)}%</text>
+                            </svg>
+                        </div>
+
+                        ${parseFloat(scorePercent) >= 50 ? `
+                            <div id="action-container-${index}-${i}" style="padding-top: 0.8rem; display: flex; align-items: center; justify-content: center; gap: 0.8rem; width: 100%; transition: all 0.3s ease;">
+                                <div id="rationale-${index}-${i}" style="display: none; opacity: 1; transition: opacity 0.3s ease; max-height: 150px; overflow-y: auto; font-size: 0.85rem; color: rgba(248, 244, 252, 0.93); line-height: 1.4; text-align: left; flex: 1;">
+                                    <strong style="color: var(--brand-yellow); display: inline-block; margin-bottom: 0.3rem;">Rationale:</strong>
+                                    <div style="display: inline;">
+                                        ${marked.parse(item.rationale || 'No explanation provided.')}
+                                    </div>
+                                </div>
+                                <button onclick="toggleRationale('${index}-${i}', this)" class="cta result-action" style="margin: 0; font-size: 0.9rem; transition: all 0.3s ease; flex-shrink: 0;">
+                                    Show rationale
+                                </button>
+                            </div>
+                        ` : ''}
+                    `;
+                    container.appendChild(card);
+                });
+            }
+
+            // Render Maintenance Data
+            const maint = data.maintenance || {};
+            const maintContent = document.getElementById('maint-content');
+            if (!maint.primary_maintenance_type) {
+                maintContent.innerHTML = '<p style="grid-column: 1 / -1; text-align: center; color: rgba(255,255,255,0.6);">No maintenance data detected or validated for this commit.</p>';
+            } else {
+                maintContent.innerHTML = `
+                    <div style="background: rgba(0,0,0,0.25); padding: 1.5rem; border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-around; gap: 0.8rem;">
+                        <p style="margin:0;"><strong style="color:var(--brand-yellow); text-transform:uppercase; font-size:0.8rem; display:block;">Primary Type</strong> <span style="font-size: 1.1rem;">${maint.primary_maintenance_type}</span></p>
+                        <hr style="border-color: rgba(255,255,255,0.1); margin: 0.2rem 0;">
+                        <p style="margin:0;"><strong style="color:var(--brand-yellow); text-transform:uppercase; font-size:0.8rem; display:block;">Class / ISO Standard</strong> ${maint.maintenance_class || '-'}</p>
+                        <hr style="border-color: rgba(255,255,255,0.1); margin: 0.2rem 0;">
+                        <p style="margin:0;"><strong style="color:var(--brand-yellow); text-transform:uppercase; font-size:0.8rem; display:block;">Base Type</strong> ${maint.maintenance_base_type || '-'}</p>
+                    </div>
+                `;
+            }
+
+            updateNav();
         }
 
         window.toggleRationale = function(id, btnElement) {
@@ -470,7 +742,7 @@
                 actionContainer.style.borderTop = '1px solid rgba(255,255,255,0.1)';
                 
                 if(btnElement) {
-                    btnElement.innerHTML = "&#10005;"; // X
+                    btnElement.innerHTML = "&#10005;"; 
                     btnElement.style.padding = "0.25rem 0.55rem"; 
                     btnElement.style.borderRadius = "50%";
                 }
@@ -481,19 +753,205 @@
 
             } else {
                 rationaleDiv.style.opacity = '0';
-                
                 setTimeout(() => {
                     rationaleDiv.style.display = 'none';
                     actionContainer.style.borderTop = 'none';
                     
                     if(btnElement) {
-                        btnElement.innerHTML = "Scopri perché";
+                        btnElement.innerHTML = "Show rationale";
                         btnElement.style.padding = ""; 
                         btnElement.style.borderRadius = ""; 
                     }
                 }, 400); 
             }
         };
+
+        window.openModal = function(src) {
+            const modal = document.getElementById('image-modal');
+            const modalImg = document.getElementById('modal-img');
+            modalImg.src = src;
+            modal.style.display = 'flex';
+        };
+
+        window.closeModal = function() {
+            document.getElementById('image-modal').style.display = 'none';
+        };
+
+        const analyseBtn = document.getElementById('analyse-btn');
+        const multiModelBtn = document.getElementById('multi-model-btn');
+        const multiModelLogs = document.getElementById('multi-model-logs');
+
+        // Multi-Model button click handler
+        multiModelBtn.addEventListener('click', () => {
+            multiModelBtn.disabled = true;
+            multiModelBtn.innerText = "Validation running, please wait at least 15 minutes...";
+            
+            const dashboard = document.getElementById('multi-model-dashboard');
+            dashboard.style.display = 'flex';
+            dashboard.innerHTML = "";
+
+            // Dictionary to hold our UI elements for each model
+            const modelsUI = {};
+
+            const multiEventSource = new EventSource('/stream_multi_model');
+
+            multiEventSource.addEventListener('multi_status', function(event) {
+                const data = JSON.parse(event.data);
+                const msg = data.message;
+
+                const match = msg.match(/^\[(.*?)\]\s*(.*)/);
+                
+                if (match && match[1] !== 'multi' && match[1] !== 'dry-run') {
+                    const modelName = match[1];
+                    const content = match[2];
+
+                    if (modelName.toLowerCase() === 'analysis') {
+                        multiModelBtn.innerText = content; // Show analysis progress on the button instead
+                        return; // Exit early
+                    }
+
+                    if (!modelsUI[modelName]) {
+                        const card = document.createElement('article');
+                        card.className = 'result-card'; 
+                        card.style.minHeight = '150px';
+                        card.style.maxHeight = '300px';
+                        
+                        // If it's the analysis phase, style it differently (Gold)
+                        const isAnalysis = modelName.toLowerCase() === 'analysis';
+                        const chipColor = isAnalysis ? 'var(--brand-yellow)' : 'var(--brand-blue)';
+                        
+                        card.innerHTML = `
+                            <header class="card-head" style="margin-bottom: 1rem;">
+                                <span class="chip" style="word-break: break-all; color: ${chipColor};">${modelName.toUpperCase()}</span>
+                            </header>
+                            <div class="model-status" style="font-size: 0.95rem; font-weight: bold; color: var(--text-soft); margin-bottom: 0.8rem; text-align: center;">Starting up...</div>
+                            
+                            <div style="background: rgba(0,0,0,0.3); border-radius: 10px; height: 10px; width: 100%; overflow: hidden; border: 1px solid rgba(255,255,255,0.1);">
+                                <div class="model-progress-bar" style="background: linear-gradient(90deg, var(--brand-pink), var(--brand-orange)); height: 100%; width: 0%; transition: width 0.4s ease;"></div>
+                            </div>
+                            
+                            <div class="model-errors" style="color: #ff4c4c; font-size: 0.8rem; margin-top: 1rem; max-height: 80px; overflow-y: auto; text-align: left; line-height: 1.4;"></div>
+                        `;
+                        dashboard.appendChild(card);
+                        
+                        modelsUI[modelName] = {
+                            card: card,
+                            statusText: card.querySelector('.model-status'),
+                            progressBar: card.querySelector('.model-progress-bar'),
+                            errors: card.querySelector('.model-errors')
+                        };
+                    }
+
+                    const ui = modelsUI[modelName];
+                    const progressMatch = content.match(/\[(\d+)\/(\d+)\]/);
+                    
+                    if (progressMatch) {
+                        const current = parseInt(progressMatch[1]);
+                        const total = parseInt(progressMatch[2]);
+                        const percent = (current / total) * 100;
+                        
+                        ui.progressBar.style.width = `${percent}%`;
+                        ui.statusText.innerText = `Processing: ${current} / ${total}`;
+                        ui.statusText.style.color = "var(--brand-yellow)";
+                    } 
+                    else if (content.includes('ERROR') || content.includes('FAILED')) {
+                        const errorLine = document.createElement('div');
+                        errorLine.style.marginBottom = '4px';
+                        errorLine.innerText = `${content.replace('ERROR ', '')}`;
+                        ui.errors.appendChild(errorLine);
+                        
+                        ui.statusText.innerText = 'Errors Occurred';
+                        ui.statusText.style.color = '#ff4c4c';
+                        ui.progressBar.style.background = '#ff4c4c';
+                    } 
+                    else if (content.includes('DONE -> OK') || content.includes('Wrote:')) {
+                        ui.statusText.innerText = 'Task Complete!';
+                        ui.statusText.style.color = '#4ade80';
+                        ui.progressBar.style.width = '100%';
+                        ui.progressBar.style.background = '#4ade80';
+                    }
+                    else {
+                        // General status updates (especially useful for the Analysis block)
+                        ui.statusText.innerText = content.substring(0, 45) + '...';
+                        ui.progressBar.style.width = '50%'; // Indeterminate state
+                    }
+                }
+            });
+
+            multiEventSource.addEventListener('multi_complete', async function(event) {
+                const data = JSON.parse(event.data);
+                multiModelBtn.innerText = "Validation Finished";
+                multiEventSource.close();
+
+                if (data.report_id) {
+                    try {
+                        const res = await fetch(`/static/reports/${data.report_id}/summary.json`);
+                        const summary = await res.json();
+                        renderDynamicDashboard(data.report_id, summary);
+                    } catch(err) {
+                        console.error("Failed to fetch report summary", err);
+                    }
+                }
+            });
+
+            multiEventSource.addEventListener('stream_error', function(event) {
+                const data = JSON.parse(event.data);
+                console.error("Multi-model stream error:", data.message);
+                multiModelBtn.disabled = false;
+                multiModelBtn.innerText = "Retry Multi-Model Validation";
+                multiEventSource.close();
+            });
+        });
+
+        function renderDynamicDashboard(reportId, summary) {
+            document.getElementById('diff-viewer').style.display = 'none';
+            
+            const reportView = document.getElementById('past-analysis-view');
+            reportView.style.display = 'flex';
+            reportView.style.marginTop = '4rem';
+            
+            const basePath = `/static/reports/${reportId}`;
+            
+            const pct = (summary.single_label_primary.percent_full_agreement * 100).toFixed(1);
+
+            reportView.innerHTML = `
+                <hr style="width: 100%; border-color: rgba(255,255,255,0.1); margin: 1rem 0 3rem 0;">
+                <h2 class="prompt-headline" style="font-size: 2.5rem; text-align: center; color: var(--brand-pink);">Validation Complete</h2>
+                <p style="text-align: center; font-size: 1.2rem; line-height: 1.6; max-width: 700px;">
+                    Inter-model agreement analysis successfully compiled across <strong>${summary.n_raters}</strong> distinct LLMs 
+                    analysing <strong>${summary.n_items}</strong> commits. 
+                    <br><span style="color: var(--brand-yellow);">Total Model Agreement: ${pct}%</span>
+                </p>
+
+                <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%; margin-top: 2rem;">
+                    
+                    <div class="result-card zoomable" onclick="openModal('${basePath}/category_ambiguity.png')" style="min-height: 250px; width: 25rem; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                        <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Category Ambiguity</h3>
+                        <img src="${basePath}/category_ambiguity.png" onerror="this.parentElement.style.display='none'" alt="Category Ambiguity" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                    </div>
+
+                    <div class="result-card secondary zoomable" onclick="openModal('${basePath}/single_label_agreement.png')" style="min-height: 250px; width: 25rem; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                        <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Single-Label Agreement</h3>
+                        <img src="${basePath}/single_label_agreement.png" onerror="this.parentElement.style.display='none'" alt="Single Label Agreement" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                    </div>
+
+                    <div class="result-card zoomable" onclick="openModal('${basePath}/category_entropy.png')" style="min-height: 250px; width: 25rem; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                        <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Disagreement Entropy</h3>
+                        <img src="${basePath}/category_entropy.png" onerror="this.parentElement.style.display='none'" alt="Category Entropy" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                    </div>
+                    
+                    <div class="result-card secondary zoomable" onclick="openModal('${basePath}/reference_comparison.png')" style="min-height: 250px; width: 25rem; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                        <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Reference vs Study Models</h3>
+                        <img src="${basePath}/reference_comparison.png" onerror="this.parentElement.style.display='none'" alt="Reference Comparison" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                    </div>
+
+                </div>
+            `;
+
+            setTimeout(() => {
+                reportView.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 200);
+        }
     </script>
 </body>
 </html>
