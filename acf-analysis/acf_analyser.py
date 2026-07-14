@@ -440,9 +440,13 @@ def classify_diff(
     system_prompt: str,
     api_key: str,
     rate_limiter: SlidingRateLimiter,
+    prior_changes: list[dict[str, str]] | None = None,
     temperature_override: float | None = None,
 ) -> dict:
     """Run the multi-label classifier over a single diff (potentially chunked).
+
+    ``prior_changes`` are the earlier edits to the same ACF file (oldest first),
+    passed to the prompt as trajectory context for the maintenance-reason axis.
 
     Returns a dict ready to be written to the primary JSONL record.
     """
@@ -484,6 +488,7 @@ def classify_diff(
             chunk_total=chunk.total,
             char_start=chunk.char_start,
             char_end=chunk.char_end,
+            prior_changes=prior_changes,
             # signals=signals,
         )
         base_messages = build_chat_messages(
@@ -995,6 +1000,23 @@ def main() -> None:
     leaf_to_class = maint["leaf_to_class"] or dict(DEFAULT_LEAF_TO_CLASS)
     leaf_to_base = maint["leaf_to_base"] or dict(DEFAULT_LEAF_TO_BASE)
 
+    # Display a summary of the loaded maintenance taxonomy, 
+    # or warn if the MR file is missing/empty and we are falling back 
+    # to bare type names with no descriptions/examples.
+    if maint["types"]:
+        print(
+            f"[maintenance] loaded {mr_path} | {len(maint['types'])} types, "
+            f"{len(maint['descriptions'])} descriptions, {len(maint['examples'])} examples | "
+            f"classes={','.join(maint['classes']) or '-'}"
+        )
+    else:
+        print(
+            f"[maintenance] WARNING: MR file not found or empty ({mr_path}) — "
+            f"falling back to {len(maintenance_types)} bare DEFAULT type names "
+            f"with NO descriptions/examples in the prompt.",
+            file=sys.stderr,
+        )
+
     system_prompt = get_system_prompt(
         categories,
         label_descriptions,
@@ -1088,11 +1110,30 @@ def main() -> None:
             timestamp_str,
         )
         if args.resume:
-            latest = _find_latest_primary_file(primary_output_path.parent)
-            processed_ids = load_processed_ids(latest) if latest else set()
-            if latest:
-                print(f"  [resume] {latest.name} — {len(processed_ids)} id già processati")
+            # Resume must CONTINUE the previous run's file, not spawn a new one.
+            # Target the --timestamp file if given, else the most recent
+            # primary_*.jsonl in the model dir; then REDIRECT both the primary and
+            # matching eval output paths onto it so new records append there
+            # instead of into a fresh primary_<now>.jsonl (which would fragment
+            # the results across two files).
+            # run_multi_model injects a FRESH --timestamp every launch, so the
+            # timestamped file usually does NOT exist yet on resume. In that case
+            # fall back to the most recent existing primary_*.jsonl instead of
+            # starting from zero (the previous bug: "always writes a new file").
+            if args.timestamp and primary_output_path.exists():
+                resume_target = primary_output_path
             else:
+                resume_target = _find_latest_primary_file(primary_output_path.parent)
+            if resume_target and resume_target.exists():
+                primary_output_path = resume_target
+                eval_output_path = resume_target.with_name(
+                    resume_target.name.replace("primary_", "eval_", 1)
+                )
+                processed_ids = load_processed_ids(primary_output_path)
+                print(f"  [resume] continuo su {primary_output_path.name} — "
+                      f"{len(processed_ids)} id già processati")
+            else:
+                processed_ids = set()
                 print("  [resume] nessun file precedente trovato, si parte da zero")
         else:
             processed_ids = set()
@@ -1105,6 +1146,29 @@ def main() -> None:
             repo_fn_totals.setdefault(r, {}).setdefault(fn, 0)
             repo_fn_totals[r][fn] += 1
 
+        # Per-file change history: map each diff_id to the EARLIER edits of the
+        # same (repo, filename), oldest first. commit_date is ISO-8601 so a string
+        # sort equals chronological order; diffs with a missing date sort first.
+        # This gives the maintenance-reason axis the cross-commit trajectory that a
+        # single diff cannot carry (consumed by build_user_prompt / prompt rule 16).
+        # Capped per diff to bound prompt token cost.
+        _MAX_PRIOR = 3
+        prior_changes_by_id: dict[str, list[dict[str, str]]] = {}
+        _diffs_by_file: dict[tuple[str, str], list[dict]] = {}
+        for d in diffs:
+            key = (str(d.get("repo", "")), str(d.get("filename", "unknown")))
+            _diffs_by_file.setdefault(key, []).append(d)
+        for _items in _diffs_by_file.values():
+            _ordered = sorted(_items, key=lambda x: str(x.get("timestamp", "")))
+            _history: list[dict[str, str]] = []
+            for d in _ordered:
+                _did = str(d.get("diff_id", ""))
+                prior_changes_by_id[_did] = _history[-_MAX_PRIOR:]
+                _history = _history + [{
+                    "commit_date": str(d.get("timestamp", "")),
+                    "commit_message": str(d.get("commit_message", "")),
+                }]
+
         print(f"[repo {repo_index}/{len(input_paths)}] {repo_label}  ({len(diffs)} diffs)")
 
         with (
@@ -1114,14 +1178,20 @@ def main() -> None:
             repo_fn_counters: dict[str, dict[str, int]] = {}
             for index, diff in enumerate(diffs, start=1):
                 diff_id = str(diff.get("diff_id", f"diff-{index}"))
-                if diff_id in processed_ids:
-                    continue
 
+                # Advance the per-file counter for EVERY diff, BEFORE the resume
+                # skip: it tracks a diff's ABSOLUTE position within its (repo,
+                # filename) group. Counting only the non-skipped diffs would reset
+                # "AGENTS.md 82/192" to 1 on every --resume.
                 repo_name = str(diff.get("repo", ""))
                 filename = str(diff.get("filename", "unknown"))
                 repo_fn_counters.setdefault(repo_name, {}).setdefault(filename, 0)
                 repo_fn_counters[repo_name][filename] += 1
                 file_idx = repo_fn_counters[repo_name][filename]
+
+                if diff_id in processed_ids:
+                    continue
+
                 file_total = repo_fn_totals.get(repo_name, {}).get(filename, "?")
                 file_progress = f"{filename} {file_idx}/{file_total}"
                 repo_prefix = f"{repo_name} | " if repo_name else ""
@@ -1148,6 +1218,7 @@ def main() -> None:
                             system_prompt=system_prompt,
                             api_key=api_key,
                             rate_limiter=rate_limiter,
+                            prior_changes=prior_changes_by_id.get(diff_id, []),
                         )
                     except Exception as exc: 
                         print(f"    ERROR classifying {diff_id}: {exc}", file=sys.stderr)

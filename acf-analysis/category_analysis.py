@@ -1,5 +1,6 @@
 import argparse
 import json
+import sys
 from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -8,10 +9,39 @@ import numpy as np
 import seaborn as sns
 from itertools import combinations
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))  # so `acf_io` (sibling) is importable
 
-OUTPUT_DIR = "output-report"
+# Source diffs, used only to recover each diff's repo (the primary records carry
+# diff_id = "<commit_hash>:<filename>" but not the repo).
+DEFAULT_DIFFS = SCRIPT_DIR.parent / "outputs" / "git_history_diffs.json"
+
+# Anchor the output to the script's own folder, NOT the current working
+# directory: running from the repo root or via the IDE "run" button (whose CWD
+# is the workspace root) would otherwise write to a different "output-report"
+# and leave the old files untouched -- looking as if nothing was overwritten.
+OUTPUT_DIR = str(SCRIPT_DIR / "output-report")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+# Map diff_id -> repo from the source git_history_diffs.json. Returns {} (so the
+# caller degrades gracefully) when the file or helper is unavailable.
+def load_repo_map(diffs_json):
+    p = Path(diffs_json)
+    if not p.exists():
+        return {}
+    try:
+        from acf_io import load_diffs_from_acf_json
+        diffs = load_diffs_from_acf_json(p)
+    except Exception as exc:
+        print(f"[!] Could not read repos from {p.name}: {exc}")
+        return {}
+    return {
+        str(d.get("diff_id", "")): str(d.get("repo", ""))
+        for d in diffs
+        if d.get("diff_id")
+    }
 
 # Reads a JSONL file and returns a list of dictionaries.
 def load_jsonl(path):
@@ -638,6 +668,298 @@ def export_bias_table(df):
     )
 
 
+# ---------------------------------------------------------------------------
+# Maintenance-reason axis (ISO/IEC/IEEE 14764): the "why" of each change.
+# These read the per-diff "maintenance" block and are skipped cleanly when the
+# input predates that axis. The base type collapses the two adaptive leaves
+# ("adaptive (correction)" / "adaptive (enhancement)") back to "adaptive";
+# the parent class (Correction / Enhancement) is reported separately.
+# ---------------------------------------------------------------------------
+MAINT_BASE_ORDER = ["corrective", "preventive", "adaptive", "additive", "perfective"]
+MAINT_CLASS_ORDER = ["Correction", "Enhancement"]
+MAINT_COLORS = {
+    "corrective": "#e74c3c",
+    "preventive": "#e67e22",
+    "adaptive":   "#3498db",
+    "additive":   "#2ecc71",
+    "perfective": "#9b59b6",
+}
+CLASS_COLORS = {"Correction": "#e74c3c", "Enhancement": "#2ecc71"}
+
+
+def _maint(r):
+    m = r.get("maintenance")
+    return m if isinstance(m, dict) else {}
+
+
+# True when at least one record carries a usable maintenance block.
+def has_maintenance(records):
+    for r in records:
+        m = _maint(r)
+        if m.get("primary_maintenance_type") or m.get("type_scores"):
+            return True
+    return False
+
+
+# Counts of the primary maintenance reason at three granularities:
+# leaf (6, adaptive split), base type (5), and parent class (2).
+def build_maintenance_distribution(records):
+    n = 0
+    base_counts, class_counts, leaf_counts = {}, {}, {}
+
+    for r in records:
+        m = _maint(r)
+        leaf = m.get("primary_maintenance_type")
+        if not leaf:
+            continue
+        n += 1
+        base = m.get("maintenance_base_type") or leaf
+        cls = m.get("maintenance_class") or ""
+        leaf_counts[leaf] = leaf_counts.get(leaf, 0) + 1
+        base_counts[base] = base_counts.get(base, 0) + 1
+        if cls:
+            class_counts[cls] = class_counts.get(cls, 0) + 1
+
+    return n, base_counts, class_counts, leaf_counts
+
+
+def _ordered(keys, preferred):
+    return [k for k in preferred if k in keys] + [k for k in keys if k not in preferred]
+
+
+# Bar chart of the primary maintenance reason (base type) across all diffs.
+def plot_maintenance_type_distribution(records):
+    n, base_counts, _, _ = build_maintenance_distribution(records)
+    if not base_counts:
+        print("[!] No maintenance data for type distribution.")
+        return
+
+    order = _ordered(base_counts.keys(), MAINT_BASE_ORDER)
+    counts = [base_counts[t] for t in order]
+    pct = [c / n * 100 for c in counts]
+    colors = [MAINT_COLORS.get(t, "#95a5a6") for t in order]
+
+    plt.figure(figsize=(11, 6))
+    bars = plt.bar(order, counts, color=colors, edgecolor="black")
+    for b, c, p in zip(bars, counts, pct):
+        plt.text(
+            b.get_x() + b.get_width() / 2, c,
+            f"{c}\n({p:.1f}%)",
+            ha="center", va="bottom", fontsize=10, fontweight="bold",
+        )
+    plt.title("Maintenance Type Distribution (primary reason per diff)")
+    plt.ylabel("Number of diffs")
+    plt.xlabel("Maintenance type (ISO/IEC/IEEE 14764)")
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, "maintenance_type_distribution.png"), dpi=300)
+    plt.close()
+    print("[+] Saved maintenance_type_distribution.png")
+
+
+# Pie of the parent class split (Correction vs Enhancement).
+def plot_maintenance_class_distribution(records):
+    _, _, class_counts, _ = build_maintenance_distribution(records)
+    if not class_counts:
+        print("[!] No maintenance class data.")
+        return
+
+    order = _ordered(class_counts.keys(), MAINT_CLASS_ORDER)
+    counts = [class_counts[c] for c in order]
+    colors = [CLASS_COLORS.get(c, "#95a5a6") for c in order]
+
+    plt.figure(figsize=(8, 8))
+    plt.pie(
+        counts, labels=order, autopct="%1.1f%%", startangle=140,
+        colors=colors, wedgeprops={"edgecolor": "white", "linewidth": 2},
+    )
+    plt.title("Correction vs Enhancement (parent class)", fontsize=15, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, "maintenance_class_distribution.png"), dpi=300)
+    plt.close()
+    print("[+] Saved maintenance_class_distribution.png")
+
+
+# Boxplots of the raw per-type scores the model assigned (leaf level, non-zero).
+def plot_maintenance_score_distribution(records):
+    rows = []
+    for r in records:
+        for t, s in (_maint(r).get("type_scores") or {}).items():
+            if isinstance(s, (int, float)) and s > 0:
+                rows.append({"Type": t, "Score": s})
+
+    if not rows:
+        print("[!] No non-zero maintenance scores.")
+        return
+
+    sdf = pd.DataFrame(rows)
+    order = sorted(sdf["Type"].unique(), key=lambda t: (t.startswith("adaptive"), t))
+
+    plt.figure(figsize=(12, 6))
+    sns.boxplot(data=sdf, x="Type", y="Score", order=order)
+    plt.xticks(rotation=30, ha="right")
+    plt.title("Score Distribution per Maintenance Type (non-zero)")
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR, "maintenance_score_distribution.png"), dpi=300)
+    plt.close()
+    print("[+] Saved maintenance_score_distribution.png")
+
+
+# Maintenance-reason trajectory across the life of ONE ACF -- the SMALLEST file
+# that exercises BOTH classes (>=1 Correction and >=1 Enhancement, >=3 changes),
+# so the line actually crosses the two bands and the chart stays compact. A
+# SINGLE line traces the change sequence, oscillating
+# between two coloured class bands: Correction (red, bottom) and Enhancement
+# (green, top). Each change is a dot coloured by its specific type. The parent
+# class per change comes from maintenance_class, which also resolves the
+# dual-parented "adaptive".
+def plot_maintenance_over_time(records, repo_map=None):
+    repo_map = repo_map or {}
+    CORR = {"corrective", "preventive"}
+    ENH = {"additive", "perfective"}
+
+    def class_of(bt: str, cls: str) -> str:
+        if cls in ("Correction", "Enhancement"):
+            return cls
+        if bt in CORR:
+            return "Correction"
+        if bt in ENH:
+            return "Enhancement"
+        return ""  # adaptive with no recorded class
+
+    # Group labelled changes per ACF; repo recovered from the diff_id so
+    # same-named files in different repos stay distinct. Keep type AND class.
+    groups: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
+    for r in records:
+        m = _maint(r)
+        bt = m.get("maintenance_base_type")
+        if not bt:
+            continue
+        cls = m.get("maintenance_class") or ""
+        did = str(r.get("diff_id", ""))
+        repo = repo_map.get(did, "") or str(r.get("repo", ""))
+        key = (repo, str(r.get("filename", "")))
+        groups.setdefault(key, []).append((str(r.get("timestamp", "")) + "|" + did, bt, cls))
+    if not groups:
+        print("[!] No maintenance data for the lifecycle plot.")
+        return
+
+    def ndistinct(items):
+        return len({t for _, t, _ in items})
+
+    def classes_of(items):
+        return {c for _, bt, cls in items if (c := class_of(bt, cls))}
+
+    # Pick the SMALLEST ACF that exercises BOTH classes (>=1 Correction AND >=1
+    # Enhancement) with >=3 changes, so the single line actually oscillates
+    # between the two bands. Relax gradually if none qualifies. Tie-break by key.
+    both = {"Correction", "Enhancement"}
+    eligible = {k: v for k, v in groups.items() if len(v) >= 3 and both <= classes_of(v)}
+    if not eligible:
+        eligible = {k: v for k, v in groups.items() if len(v) >= 3 and ndistinct(v) >= 2}
+    if not eligible:
+        eligible = {k: v for k, v in groups.items() if len(v) >= 3}
+    if not eligible:
+        print("[!] No ACF with >=3 labelled changes for the lifecycle plot.")
+        return
+    (repo, filename), items = min(sorted(eligible.items()), key=lambda kv: len(kv[1]))
+    items.sort(key=lambda t: t[0])
+    n = len(items)
+    n_types = ndistinct(items)
+
+    xs, ys, dot_colors, types_seen, date_labels = [], [], [], [], []
+    for i, (sortkey, bt, cls) in enumerate(items):
+        c = class_of(bt, cls)
+        ys.append(1.0 if c == "Enhancement" else (0.0 if c == "Correction" else 0.5))
+        xs.append(i + 1)
+        dot_colors.append(MAINT_COLORS.get(bt, "#95a5a6"))
+        types_seen.append(bt)
+        # sortkey is "<timestamp>|<diff_id>"; show the commit date (YYYY-MM-DD).
+        ts = sortkey.split("|", 1)[0]
+        date_labels.append(ts[:10] if ts else f"#{i + 1}")
+
+    fig, ax = plt.subplots(figsize=(min(20.0, max(9.0, n * 0.75)), 4.8))
+    # Two class bands.
+    ax.axhspan(-0.6, 0.5, color="#e74c3c", alpha=0.12, zorder=0)   # Correction (bottom)
+    ax.axhspan(0.5, 1.6, color="#2ecc71", alpha=0.12, zorder=0)    # Enhancement (top)
+    ax.axhline(0.5, color="#c8ccd2", linewidth=1.2, zorder=1)
+
+    # Single trajectory line + type-coloured dots.
+    ax.plot(xs, ys, color="#555b64", linewidth=2.0, zorder=2)
+    ax.scatter(xs, ys, c=dot_colors, s=190, edgecolors="black", linewidths=0.8, zorder=3)
+
+    ax.set_yticks([0, 1])
+    ax.set_yticklabels(["Correction", "Enhancement"], fontweight="bold")
+    ax.get_yticklabels()[0].set_color("#c0392b")
+    ax.get_yticklabels()[1].set_color("#219653")
+    ax.set_ylim(-0.6, 1.6)
+    ax.set_xticks(xs)
+    ax.set_xticklabels(date_labels, rotation=90, ha="center", fontsize=9)
+    ax.set_xlim(0.4, n + 0.6)
+    ax.set_xlabel("Commit date  (chronological: first edit → last edit)")
+    # Subtle drop line from each dot down to its date tick. Medium grey + dashes
+    # so it reads over the coloured class bands without dominating.
+    for x, y in zip(xs, ys):
+        ax.plot([x, x], [-0.6, y], color="#6b7280", linewidth=1.0,
+                linestyle=(0, (4, 3)), alpha=0.65, zorder=1)
+
+    # Legend maps dot colour -> specific maintenance type (only those present).
+    import matplotlib.lines as mlines
+    handles = [
+        mlines.Line2D([], [], marker="o", linestyle="none", markersize=10,
+                      markerfacecolor=MAINT_COLORS.get(t, "#95a5a6"),
+                      markeredgecolor="black", label=t)
+        for t in _ordered(set(types_seen), MAINT_BASE_ORDER)
+    ]
+    ax.legend(handles=handles, title="Maintenance type (dot colour)",
+              loc="upper left", bbox_to_anchor=(1.01, 1), frameon=False)
+
+    repo_label = repo or "(repo unknown)"
+    file_label = filename or "(unknown file)"
+    ax.set_title(
+        f"Maintenance across one ACF's life  ·  Correction ↔ Enhancement\n"
+        f"{repo_label} — {file_label}  ·  {n} changes, {n_types} types",
+        fontsize=14, fontweight="bold",
+    )
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUTPUT_DIR, "maintenance_lifecycle.png"), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[+] Saved maintenance_lifecycle.png (ACF: {repo_label}/{file_label}, {n} changes, {n_types} types)")
+
+
+# Maintenance distribution table (console only) at all three granularities.
+def build_maintenance_table(records):
+    n, base_counts, class_counts, leaf_counts = build_maintenance_distribution(records)
+    if not leaf_counts:
+        return None
+
+    rows = []
+    for t in _ordered(base_counts.keys(), MAINT_BASE_ORDER):
+        rows.append({"Level": "base_type", "Name": t, "Count": base_counts[t], "Pct": base_counts[t] / n * 100})
+    for c in _ordered(class_counts.keys(), MAINT_CLASS_ORDER):
+        rows.append({"Level": "class", "Name": c, "Count": class_counts[c], "Pct": class_counts[c] / n * 100})
+    for lf in sorted(leaf_counts):
+        rows.append({"Level": "leaf", "Name": lf, "Count": leaf_counts[lf], "Pct": leaf_counts[lf] / n * 100})
+
+    return pd.DataFrame(rows)
+
+
+# Runs every maintenance-axis analysis; no-op (with a note) on legacy inputs.
+def run_maintenance_analysis(records, repo_map=None):
+    if not has_maintenance(records):
+        print("\n[i] No 'maintenance' block in input — skipping maintenance analysis.")
+        return
+
+    print("\n=== MAINTENANCE-REASON AXIS (ISO/IEC/IEEE 14764) ===\n")
+    mdf = build_maintenance_table(records)
+    if mdf is not None:
+        print(mdf.to_string(index=False))
+
+    plot_maintenance_type_distribution(records)
+    plot_maintenance_class_distribution(records)
+    plot_maintenance_score_distribution(records)
+    plot_maintenance_over_time(records, repo_map)
+
+
 def main():
 
     parser = argparse.ArgumentParser(
@@ -686,9 +1008,17 @@ def main():
         help="Save plot to PNG"
     )
 
+    parser.add_argument(
+        "--diffs-json",
+        default=str(DEFAULT_DIFFS),
+        help=f"Source diffs, used only to recover each diff's repo for the "
+             f"maintenance lifecycle chart (default: {DEFAULT_DIFFS}).",
+    )
+
     args = parser.parse_args()
 
     records = load_jsonl(args.input)
+    repo_map = load_repo_map(args.diffs_json)
 
     df = build_distribution(
         records,
@@ -769,6 +1099,8 @@ def main():
     plot_status_pie_chart(records)
 
     export_bias_table(df)
+
+    run_maintenance_analysis(records, repo_map)
 
     print(
         f"\n[+] Analysis exported to: {OUTPUT_DIR}"

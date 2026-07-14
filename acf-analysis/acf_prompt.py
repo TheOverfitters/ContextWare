@@ -200,6 +200,9 @@ You will receive, in the user message:
   * "chunk" metadata (index, total, byte range) when the diff was split.
   * The chunk text under "diff".
   * "filename", "commit_message" and "commit_date" (ISO 8601) for context.
+  * Optionally "prior_changes_to_this_file": earlier edits to the SAME file
+    (oldest first, each with commit_date and commit_message), giving the change
+    trajectory for the maintenance-reason axis.
 
 You MUST return exactly one raw JSON object and nothing else -- no
 markdown, no code fences, no commentary. The object MUST have this shape:
@@ -294,6 +297,23 @@ Rules:
       repair); "adaptive (enhancement)" when adapting proactively to an
       evolving or new target environment. A pure internal bug fix is
       "corrective"; a not-yet-triggered latent fix is "preventive".
+  16. To decide corrective vs perfective, read the BEFORE-STATE that is already
+      in the diff: the removed ('-') and unchanged context lines show what the
+      text said before this edit. If the removed content was WRONG/misleading and
+      the change repairs it -> corrective. If the removed content was VALID and
+      the change only makes it clearer, tidier, or better organized with the same
+      meaning -> perfective. If "prior_changes_to_this_file" is present (earlier
+      edits to this same file, oldest first), use it as trajectory: an edit that
+      reverses, fixes, or walks back a rule introduced by an earlier commit is
+      corrective (or adaptive (correction) if an external change drove it), NOT
+      perfective. Do not treat the mere presence of history as a reason by itself.
+  17. AXIS ISOLATION (critical): "prior_changes_to_this_file" is CONTEXT for the
+      maintenance-reason axis ONLY. It carries earlier commit MESSAGES, not their
+      diff content. It MUST NEVER add or raise a CATEGORY score. Score the 16
+      categories STRICTLY from the current "diff" (its '+' and '-' lines). A topic
+      that appears only in a prior commit message (or only in "commit_message"),
+      but is not present in the current diff's changed lines, MUST score 0.0. Do
+      not carry over categories from previous commits.
 
 SCORING EXAMPLES (real diffs; only the non-zero categories are shown -- every
 other category scores 0.0). These show the expected confidence level; do NOT
@@ -352,8 +372,18 @@ def build_user_prompt(
     char_start: int = 0,
     char_end: int = 0,
     signals: list[str] | None = None,
+    prior_changes: list[dict[str, str]] | None = None,
 ) -> str:
-    """Build the per-diff user message sent to the LLM."""
+    """Build the per-diff user message sent to the LLM.
+
+    ``prior_changes`` is the ordered (oldest-first) list of EARLIER edits to the
+    SAME ACF file, each ``{"commit_date": ..., "commit_message": ...}``. It gives
+    the model the change *trajectory* so it can judge the maintenance reason of
+    the current edit against what came before (e.g. a later edit that reverses or
+    fixes an earlier rule is corrective, not perfective). The before-state of the
+    edited lines themselves already lives in the diff's removed ('-') and context
+    lines; this adds the cross-commit history the single diff cannot carry.
+    """
     signals = signals or []
     payload: dict[str, Any] = {
         "chunk": {
@@ -369,6 +399,10 @@ def build_user_prompt(
         # "signals": signals,
         "diff": chunk_text,
     }
+    if prior_changes:
+        # Only the earlier edits to this same file, oldest first. Kept to
+        # date+message (not full patches) to bound token cost.
+        payload["prior_changes_to_this_file"] = prior_changes
     # Use json.dumps for predictable, model-friendly formatting.
     return json.dumps(payload, ensure_ascii=False, indent=2)
 

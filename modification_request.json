@@ -18,8 +18,8 @@
       "class": "Correction",
       "description": "Modification of a software product performed after delivery to correct DISCOVERED problems; the modification repairs the software product to satisfy defined system requirements (ISO/IEC/IEEE 14764:2022 §3.1.4, §8.2). Corrective maintenance addresses errors that have already manifested. Look for: bug fixes, repairing behavior that violates existing requirements, crash/error corrections, and emergency maintenance (§3.1.5) — an unscheduled fix performed to temporarily keep a system operational pending a full corrective release. NOT this if: the fault has NOT yet occurred in the live system and the change pre-empts a latent defect (-> preventive). NOT this if: the change implements new or changed requirements rather than repairing existing ones (-> adaptive, additive, perfective).",
       "examples": [
-        "fix: correct off-by-one that returned the wrong record when the result set had a single row, restoring documented getUser() behavior",
-        "Hotfix: patch startup crash when the config file is missing (emergency fix, pending a full corrective release)."
+        "fix: correct the wrong build command in AGENTS.md — agents were told to run `npm start`, which does not exist; replaced with the working `npm run dev`.",
+        "Remove a misleading rule in CLAUDE.md that instructed agents to edit generated files, which was breaking builds."
       ]
     },
     {
@@ -27,8 +27,8 @@
       "class": "Correction",
       "description": "Modification of a software product after delivery to correct LATENT faults in the software product BEFORE they occur in the live system (ISO/IEC/IEEE 14764:2022 §3.1.10, §8.2). The defect has not yet been triggered; the change is made proactively to prevent a future failure. Look for: fixing potential/latent defects, hardening against future failures, closing edge cases that could break but have not yet. NOT this if: the problem has already manifested in operation (-> corrective). NOT this if: the change improves an attribute (performance, readability) with no underlying latent fault (-> perfective).",
       "examples": [
-        "Add bounds checks to the buffer handler to eliminate a latent overflow that has not yet been hit in production.",
-        "Guard date parsing against a leap-year edge case that would fail on Feb 29 before it ever triggers."
+        "Add a warning to AGENTS.md — 'never commit real secrets to .env.example' — to pre-empt a mistake agents keep almost making, before it happens.",
+        "Add a guardrail note in CLAUDE.md that the `/deploy` command must never be run on the main branch, before anyone triggers it by accident."
       ]
     },
     {
@@ -37,8 +37,8 @@
       "class": "Enhancement",
       "description": "Adaptive maintenance requested from an ENHANCEMENT MR (ISO/IEC/IEEE 14764:2022 §3.1.1, §8.2; Note 5 to §3.1.8): modification performed after delivery to keep the software usable in an EVOLVING or CHANGING environment, or to make it operate in a NEW/different environment on which it was not initially intended to run. The environment change is anticipated or forward-looking — the software is adapted proactively as the target environment evolves, which constitutes a new requirement. Look for: preparing for an upcoming runtime/OS/library version, porting to a new platform or environment the software did not previously target, adapting ahead of an announced external interface change. NOT this if: the environment has ALREADY changed and the software is now broken/incompatible and must be repaired to restore usability (-> adaptive (correction)). NOT this if: the change adds brand-new functionality unrelated to an environment change (-> additive).",
       "examples": [
-        "feat: add a Postgres 16 driver path so the app is ready to run on the upcoming database upgrade.",
-        "Port the storage layer to also support the new cloud environment we plan to deploy to."
+        "Update AGENTS.md ahead of the planned migration to the v2 CLI, documenting the new commands before the rollout happens.",
+        "Add guidance to CLAUDE.md for the new MCP server the team is about to adopt, in preparation for the switch."
       ]
     },
     {
@@ -47,8 +47,8 @@
       "class": "Correction",
       "description": "Adaptive maintenance requested from a CORRECTION MR (ISO/IEC/IEEE 14764:2022 §3.1.1, §8.2; Note 5 to §3.1.8): modification performed after delivery to adapt the software to an environment that has ALREADY changed. The external change (OS/database/library upgrade, changed external interface) has already happened and the software no longer works as required, so it is repaired to restore usability against its existing requirement of operating in that environment. The trigger is reactive — something in the environment broke compatibility. Look for: fixing calls to an API/library that was already upgraded or deprecated, restoring compatibility after a runtime/OS bump that already occurred, repairing an integration broken by a third-party change. NOT this if: the environment change is anticipated/proactive rather than already in effect (-> adaptive (enhancement)). NOT this if: the defect is in the software's own logic rather than driven by an environment change (-> corrective, preventive).",
       "examples": [
-        "fix: update deprecated crypto API calls that broke after the Node 20 upgrade already rolled out.",
-        "Restore PostgreSQL connectivity after the server was upgraded to 16 and the old driver stopped working."
+        "docs: update references in CLAUDE.md from 'Claude Code Web UI' to 'Common Agent UI' after the product was already renamed.",
+        "Fix the tool name in AGENTS.md after `pgrun` was renamed to `polter`; the old instruction had already stopped working."
       ]
     },
     {
@@ -56,8 +56,8 @@
       "class": "Enhancement",
       "description": "Modification of a software product performed after delivery to ADD functionality or features to enhance the usage of the product (ISO/IEC/IEEE 14764:2022 §3.1.2, §8.2). It is distinguished from perfective in that relatively large additions of new code are made to the existing software rather than refining what already exists. Look for: new features, new functions/capabilities, sizable new code that extends the product's usage. NOT this if: little or no new code is added and the change refines or improves existing behavior/attributes (-> perfective). NOT this if: the addition exists only to accommodate an external environment change (-> adaptive).",
       "examples": [
-        "feat: add CSV export option to the reports dashboard.",
-        "Implement multi-factor authentication as a new login method."
+        "Add a new 'Testing' section to AGENTS.md describing how to run the test suite, which the file did not cover before.",
+        "Introduce a new commit-message conventions block in CLAUDE.md that did not previously exist."
       ]
     },
     {
@@ -65,8 +65,8 @@
       "class": "Enhancement",
       "description": "Modification of a software product to provide enhancements for users, improvements of information for users, and changes to improve software performance, maintainability or other software attributes (ISO/IEC/IEEE 14764:2022 §3.1.9, §8.2). Perfective changes improve the product's performance or maintainability, and can entail new functionality improvements for users or reverse engineering to create documentable functionality. Little if any large new capability is added; the focus is refining what exists. Look for: refactoring, performance/maintainability improvements, UX or user-information improvements to existing features, reverse engineering for documentation. NOT this if: large new functionality is added (-> additive). NOT this if: it corrects a discovered or latent fault (-> corrective, preventive).",
       "examples": [
-        "refactor: simplify the payment module and reduce cyclomatic complexity; no behavior change.",
-        "Improve perceived performance by lazy-loading dashboard images."
+        "Rewrite an ambiguous setup section in CLAUDE.md for clarity — same instructions, clearer wording, no new rules.",
+        "Reorganize AGENTS.md into clearer headings and tighten the wording to improve readability, without changing any guidance."
       ]
     }
   ]

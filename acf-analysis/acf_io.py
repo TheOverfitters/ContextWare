@@ -194,6 +194,10 @@ def load_diffs_from_acf_data(data: Any) -> list[dict[str, Any]]:
                 or commit.get("date")
                 or ""
             )
+            # Parent (previous) commit: needed to link the file's prior state,
+            # e.g. to disambiguate adaptive-correction vs adaptive-enhancement.
+            base_sha = str(commit.get("base_sha") or commit.get("parent") or "")
+            compare_url = str(commit.get("url") or "")
             for entry in commit.get("acf_files", []):
                 patch = entry.get("patch")
                 if not patch:
@@ -203,6 +207,8 @@ def load_diffs_from_acf_data(data: Any) -> list[dict[str, Any]]:
                     {
                         "diff_id": f"{commit_hash}:{filename}",
                         "commit_hash": commit_hash,
+                        "base_sha": base_sha,
+                        "compare_url": compare_url,
                         "commit_message": commit_message,
                         "timestamp": timestamp,
                         "filename": filename,

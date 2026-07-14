@@ -69,6 +69,11 @@ DEFAULT_CATEGORIES_PATH = SCRIPT_DIR.parent / "categories.json"
 # The primary LLM the study models are benchmarked against (treated as reference).
 DEFAULT_REFERENCE = "gemma4:31b-cloud"
 
+# Maintenance-reason axis (ISO/IEC/IEEE 14764). Two label spaces are scored:
+# the base type (5, adaptive leaves collapsed) and the parent class (2).
+MAINT_BASE_ORDER = ["corrective", "preventive", "adaptive", "additive", "perfective"]
+MAINT_CLASS_ORDER = ["Correction", "Enhancement"]
+
 
 def load_category_names(path: Path) -> list[str]:
     """Read the ordered category names from categories.json.
@@ -135,6 +140,27 @@ def above_threshold_set(record: dict, categories: list[str], threshold: float) -
 def primary_of(record: dict) -> str:
     primary = record.get("primary") or {}
     return str(primary.get("primary_category", "") or "")
+
+
+def maint_base_of(record: dict) -> str:
+    """Primary maintenance base type (adaptive leaves collapsed); "" if absent."""
+    m = record.get("maintenance") or {}
+    return str(m.get("maintenance_base_type") or "")
+
+
+def maint_class_of(record: dict) -> str:
+    """Primary maintenance parent class (Correction/Enhancement); "" if absent."""
+    m = record.get("maintenance") or {}
+    return str(m.get("maintenance_class") or "")
+
+
+def has_maintenance_axis(aligned: dict[str, list[dict]]) -> bool:
+    """True when at least one aligned record carries a maintenance base type."""
+    return any(
+        maint_base_of(r)
+        for rows in aligned.values()
+        for r in rows
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -278,6 +304,37 @@ def plurality(votes: list[str]) -> str:
 # --------------------------------------------------------------------------- #
 # Analysis
 # --------------------------------------------------------------------------- #
+def _single_label_block(
+    rows: list[list[str]],
+    model_names: list[str],
+    label_space: list[str],
+) -> dict:
+    """Single-label agreement metrics over a units x raters matrix of labels.
+
+    Shared by the category ``primary_category`` axis and the maintenance-reason
+    axes (base type and parent class): each is one nominal label per rater.
+    """
+    n_raters = len(model_names)
+    pair_pct = pairwise_percent_agreement(rows)
+    pair_cohen = {
+        (a, b): cohen_kappa([r[a] for r in rows], [r[b] for r in rows])
+        for a, b in combinations(range(n_raters), 2)
+    }
+    return {
+        "percent_full_agreement": percent_full_agreement(rows),
+        "mean_pairwise_percent_agreement": _mean(list(pair_pct.values())),
+        "fleiss_kappa": fleiss_kappa(rows, label_space),
+        "krippendorff_alpha": krippendorff_alpha_nominal(rows),
+        "pairwise_percent_agreement": {
+            f"{model_names[a]} vs {model_names[b]}": v for (a, b), v in pair_pct.items()
+        },
+        "pairwise_cohen_kappa": {
+            f"{model_names[a]} vs {model_names[b]}": v for (a, b), v in pair_cohen.items()
+        },
+        "mean_pairwise_cohen_kappa": _mean(list(pair_cohen.values())),
+    }
+
+
 def analyse(
     aligned: dict[str, list[dict]],
     model_names: list[str],
@@ -468,6 +525,126 @@ def analyse_vs_reference(
     }
 
 
+def analyse_maintenance(
+    aligned: dict[str, list[dict]],
+    model_names: list[str],
+) -> dict | None:
+    """Inter-model agreement on the maintenance-reason axis (ISO/IEC/IEEE 14764).
+
+    Scores two nominal label spaces, both single-label (one dominant reason per
+    diff): the base type (5, adaptive leaves collapsed) and the parent class
+    (Correction/Enhancement). Also reports, per base type, how ambiguous it is
+    across raters (presence-disagreement + binary kappa), the analogue of the
+    per-category ambiguity table. Returns ``None`` on legacy inputs with no
+    maintenance block.
+    """
+    if not has_maintenance_axis(aligned):
+        return None
+
+    diff_ids = list(aligned.keys())
+    n_raters = len(model_names)
+
+    base_rows = [[maint_base_of(r) for r in aligned[d]] for d in diff_ids]
+    class_rows = [[maint_class_of(r) for r in aligned[d]] for d in diff_ids]
+
+    base_labels = sorted({lab for row in base_rows for lab in row} | set(MAINT_BASE_ORDER))
+    class_labels = sorted({lab for row in class_rows for lab in row} | set(MAINT_CLASS_ORDER))
+
+    base_block = _single_label_block(base_rows, model_names, base_labels)
+    class_block = _single_label_block(class_rows, model_names, class_labels)
+
+    # Per-type ambiguity: treat "this rater's primary base type == t" as a binary
+    # present/absent label, so we can see which reason drives disagreement.
+    observed = {lab for row in base_rows for lab in row if lab}
+    type_order = [t for t in MAINT_BASE_ORDER if t in observed] + sorted(observed - set(MAINT_BASE_ORDER))
+    per_type = {}
+    for t in type_order:
+        bin_rows = [[("1" if lab == t else "0") for lab in row] for row in base_rows]
+        present = sum(r.count("1") for r in bin_rows)
+        prevalence = present / (len(bin_rows) * n_raters) if bin_rows else float("nan")
+        disagree = sum(1 for r in bin_rows if len(set(r)) > 1) / len(bin_rows) if bin_rows else float("nan")
+        pair_ck = [
+            cohen_kappa([row[a] for row in bin_rows], [row[b] for row in bin_rows])
+            for a, b in combinations(range(n_raters), 2)
+        ]
+        per_type[t] = {
+            "prevalence": prevalence,
+            "presence_disagreement_rate": disagree,
+            "fleiss_kappa": fleiss_kappa(bin_rows, ["0", "1"]),
+            "mean_pairwise_cohen_kappa": _mean(pair_ck),
+        }
+
+    # Per-instance rows for CSV / auditing.
+    log2_r = math.log2(n_raters) if n_raters > 1 else 1.0
+    per_instance = []
+    for i, d in enumerate(diff_ids):
+        votes = base_rows[i]
+        cvotes = class_rows[i]
+        ent = shannon_entropy_bits(votes)
+        per_instance.append({
+            "diff_id": d,
+            "base_votes": "|".join(votes),
+            "plurality_base": plurality(votes),
+            "base_entropy_norm": ent / log2_r if log2_r else 0.0,
+            "base_disagreement_fraction": 1 - (max(Counter(votes).values()) / n_raters),
+            "class_votes": "|".join(cvotes),
+            "class_full_agreement": 1.0 if len(set(cvotes)) == 1 else 0.0,
+        })
+
+    return {
+        "n_items": len(diff_ids),
+        "n_raters": n_raters,
+        "raters": model_names,
+        "base_type": base_block,
+        "parent_class": class_block,
+        "per_type": per_type,
+        "_per_instance": per_instance,
+    }
+
+
+def analyse_maintenance_vs_reference(
+    aligned: dict[str, list[dict]],
+    ref_records: dict[str, dict],
+    model_names: list[str],
+    ref_name: str,
+) -> dict | None:
+    """Compare each study model's maintenance reason against the reference LLM.
+
+    Reports, per study model, primary-agreement + Cohen kappa on both the base
+    type and the parent class, on the diffs shared with the reference. Returns
+    ``None`` when neither side carries a maintenance block.
+    """
+    diff_ids = [d for d in aligned if d in ref_records]
+    if not diff_ids:
+        return None
+    if not has_maintenance_axis({d: aligned[d] for d in diff_ids}) and not any(
+        maint_base_of(ref_records[d]) for d in diff_ids
+    ):
+        return None
+
+    ref_base = {d: maint_base_of(ref_records[d]) for d in diff_ids}
+    ref_class = {d: maint_class_of(ref_records[d]) for d in diff_ids}
+
+    per_model: dict[str, dict] = {}
+    for mi, model in enumerate(model_names):
+        s_base = [maint_base_of(aligned[d][mi]) for d in diff_ids]
+        s_class = [maint_class_of(aligned[d][mi]) for d in diff_ids]
+        r_base = [ref_base[d] for d in diff_ids]
+        r_class = [ref_class[d] for d in diff_ids]
+        per_model[model] = {
+            "base_agreement": _mean([1.0 if a == b else 0.0 for a, b in zip(s_base, r_base)]),
+            "base_cohen_kappa": cohen_kappa(s_base, r_base),
+            "class_agreement": _mean([1.0 if a == b else 0.0 for a, b in zip(s_class, r_class)]),
+            "class_cohen_kappa": cohen_kappa(s_class, r_class),
+        }
+
+    return {
+        "reference": ref_name,
+        "n_items": len(diff_ids),
+        "per_model": per_model,
+    }
+
+
 def _mean(values: list[float]) -> float:
     vals = [v for v in values if v is not None and not (isinstance(v, float) and math.isnan(v))]
     return sum(vals) / len(vals) if vals else float("nan")
@@ -533,6 +710,43 @@ def print_report(result: dict) -> None:
                 f"    {model:24s} {c['primary_agreement']:8.3f} {_fmt(c['primary_cohen_kappa'])} "
                 f"{c['mean_jaccard']:8.3f} {_fmt(c['mean_per_category_cohen_kappa'])}"
             )
+
+    maint = result.get("maintenance_agreement")
+    if maint:
+        print(f"\n[5] MAINTENANCE REASON  (ISO/IEC/IEEE 14764, {maint['n_items']} diffs)")
+        for level_key, level_label in (
+            ("base_type", "base type (5): corrective/preventive/adaptive/additive/perfective"),
+            ("parent_class", "parent class (2): Correction / Enhancement"),
+        ):
+            b = maint[level_key]
+            print(f"    -- {level_label} --")
+            print(f"       full agreement (all {maint['n_raters']}) : {_fmt(b['percent_full_agreement'])}")
+            print(f"       mean pairwise agreement     : {_fmt(b['mean_pairwise_percent_agreement'])}")
+            print(f"       Fleiss' kappa               : {_fmt(b['fleiss_kappa'])}")
+            print(f"       Krippendorff's alpha        : {_fmt(b['krippendorff_alpha'])}")
+            print(f"       mean pairwise Cohen kappa   : {_fmt(b['mean_pairwise_cohen_kappa'])}")
+        print("    per-type ambiguity (most ambiguous first):")
+        print(f"    {'type':14s} {'prev':>6s} {'disagr':>7s} {'fleissK':>8s} {'cohenK':>7s}")
+        for t, c in sorted(
+            maint["per_type"].items(),
+            key=lambda kv: kv[1]["presence_disagreement_rate"]
+            if not math.isnan(kv[1]["presence_disagreement_rate"]) else -1,
+            reverse=True,
+        ):
+            print(
+                f"    {t:14s} {c['prevalence']:6.3f} {c['presence_disagreement_rate']:7.3f} "
+                f"{_fmt(c['fleiss_kappa'])} {_fmt(c['mean_pairwise_cohen_kappa'])}"
+            )
+
+        mref = maint.get("reference_comparison")
+        if mref:
+            print(f"\n[6] MAINTENANCE vs REFERENCE  ({mref['reference']}, {mref['n_items']} diffs)")
+            print(f"    {'model':24s} {'baseAgr':>8s} {'baseK':>7s} {'classAgr':>9s} {'classK':>7s}")
+            for model, c in mref["per_model"].items():
+                print(
+                    f"    {model:24s} {c['base_agreement']:8.3f} {_fmt(c['base_cohen_kappa'])} "
+                    f"{c['class_agreement']:9.3f} {_fmt(c['class_cohen_kappa'])}"
+                )
     print("=" * 72)
 
 
@@ -540,6 +754,9 @@ def write_outputs(result: dict, report_dir: Path) -> None:
     report_dir.mkdir(parents=True, exist_ok=True)
 
     per_instance = result.pop("_per_instance")
+    # Maintenance per-instance rows go to their own CSV, not the summary JSON.
+    maint = result.get("maintenance_agreement")
+    maint_per_instance = maint.pop("_per_instance", None) if isinstance(maint, dict) else None
     (report_dir / "summary.json").write_text(
         json.dumps(result, indent=2, default=str), encoding="utf-8"
     )
@@ -587,6 +804,32 @@ def write_outputs(result: dict, report_dir: Path) -> None:
             for cat in cats:
                 w.writerow([cat] + [ref["per_model"][m]["per_category_cohen_kappa"][cat] for m in models])
 
+    if isinstance(maint, dict):
+        # Per-type maintenance ambiguity table.
+        with (report_dir / "maintenance_per_type.csv").open("w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(["type", "prevalence", "presence_disagreement_rate",
+                        "fleiss_kappa", "mean_pairwise_cohen_kappa"])
+            for t, c in maint["per_type"].items():
+                w.writerow([t, c["prevalence"], c["presence_disagreement_rate"],
+                            c["fleiss_kappa"], c["mean_pairwise_cohen_kappa"]])
+        # Per-instance maintenance votes.
+        if maint_per_instance:
+            with (report_dir / "maintenance_per_instance.csv").open("w", newline="", encoding="utf-8") as fh:
+                w = csv.DictWriter(fh, fieldnames=list(maint_per_instance[0].keys()))
+                w.writeheader()
+                w.writerows(maint_per_instance)
+        # Maintenance agreement vs the reference LLM, per study model.
+        mref = maint.get("reference_comparison")
+        if mref:
+            with (report_dir / "maintenance_reference.csv").open("w", newline="", encoding="utf-8") as fh:
+                w = csv.writer(fh)
+                w.writerow(["model", "reference", "n_items", "base_agreement",
+                            "base_cohen_kappa", "class_agreement", "class_cohen_kappa"])
+                for model, c in mref["per_model"].items():
+                    w.writerow([model, mref["reference"], mref["n_items"], c["base_agreement"],
+                                c["base_cohen_kappa"], c["class_agreement"], c["class_cohen_kappa"]])
+
     print(f"\nWrote: {report_dir / 'summary.json'}")
     print(f"       {report_dir / 'per_category.csv'}")
     print(f"       {report_dir / 'per_instance.csv'}")
@@ -611,39 +854,60 @@ def make_charts(result: dict, report_dir: Path) -> None:
     single = result["single_label_primary"]
     threshold = result["multi_label_threshold"]["threshold"]
 
+    # Minimum plurality-primary support below which a per-category entropy is too
+    # noisy to rank on (e.g. n<=2 categories dominated the raw chart otherwise).
+    MIN_SUPPORT = 20
+
     # (a) Key §5 result: categories ranked by presence-disagreement rate, with
-    #     their Fleiss' kappa overlaid so "ambiguous" reads against "agreement".
+    #     their Fleiss' kappa overlaid. Disagreement (0..~0.2) and kappa (0.4..0.8)
+    #     are not commensurable, so each gets its own x-axis rather than sharing one.
     cats = sorted(per_cat, key=lambda c: per_cat[c]["presence_disagreement_rate"], reverse=True)
     disagree = [per_cat[c]["presence_disagreement_rate"] for c in cats]
     kappa = [per_cat[c]["fleiss_kappa"] for c in cats]
-    y = range(len(cats))
+    y = list(range(len(cats)))
     fig, ax = plt.subplots(figsize=(12, 8))
-    ax.barh(list(y), disagree, color="#d1495b", label="presence disagreement rate")
-    ax.set_yticks(list(y))
+    ax.barh(y, disagree, color="#d1495b")
+    ax.set_yticks(y)
     ax.set_yticklabels(cats)
     ax.invert_yaxis()  # most ambiguous on top
-    ax.set_xlabel("Disagreement rate / Fleiss' kappa")
+    ax.set_xlabel("Presence disagreement rate", color="#d1495b")
+    ax.tick_params(axis="x", colors="#d1495b")
+    ax.set_xlim(0, max(disagree) * 1.15)
     ax.set_title(f"Category ambiguity (multi-label, threshold {threshold})")
-    ax.plot(kappa, list(y), "o-", color="#1b3a4b", label="Fleiss' kappa")
+
+    ax_k = ax.twiny()  # Fleiss' kappa on an independent top axis
+    ax_k.plot(kappa, y, "o-", color="#1b3a4b")
+    ax_k.set_xlabel("Fleiss' kappa (agreement)", color="#1b3a4b")
+    ax_k.tick_params(axis="x", colors="#1b3a4b")
+    ax_k.set_xlim(0, 1)
+
+    ax.plot([], [], color="#d1495b", linewidth=6, label="presence disagreement rate")
+    ax.plot([], [], "o-", color="#1b3a4b", label="Fleiss' kappa")
     ax.legend(loc="lower right")
     plt.tight_layout()
     _save(plt, report_dir / "category_ambiguity.png")
 
     # (b) Mean primary-vote entropy per category (the entropy view of ambiguity).
+    #     Low-support categories are shown greyed out: an entropy over 1-2 diffs is
+    #     not a reliable ranking signal, so it must not read as a headline result.
     cats_e = sorted(amb, key=lambda c: (amb[c]["mean_primary_entropy_norm"]
                                         if not math.isnan(amb[c]["mean_primary_entropy_norm"]) else -1),
                     reverse=True)
     ent = [0.0 if math.isnan(amb[c]["mean_primary_entropy_norm"]) else amb[c]["mean_primary_entropy_norm"]
            for c in cats_e]
     n_prim = [amb[c]["n_as_plurality_primary"] for c in cats_e]
+    colors = ["#edae49" if n >= MIN_SUPPORT else "#d9d9d9" for n in n_prim]
     plt.figure(figsize=(12, 7))
-    bars = plt.bar(range(len(cats_e)), ent, color="#edae49")
+    bars = plt.bar(range(len(cats_e)), ent, color=colors)
     for rect, n in zip(bars, n_prim):  # annotate with support (n diffs)
         plt.text(rect.get_x() + rect.get_width() / 2, rect.get_height(),
                  f"n={n}", ha="center", va="bottom", fontsize=8)
     plt.xticks(range(len(cats_e)), cats_e, rotation=45, ha="right")
     plt.ylabel("Mean primary-vote entropy (normalised)")
     plt.title("Per-category disagreement entropy (when chosen as primary)")
+    plt.plot([], [], color="#edae49", linewidth=6, label=f"n ≥ {MIN_SUPPORT}")
+    plt.plot([], [], color="#d9d9d9", linewidth=6, label=f"n < {MIN_SUPPORT} (low support)")
+    plt.legend(loc="upper right")
     plt.tight_layout()
     _save(plt, report_dir / "category_entropy.png")
 
@@ -662,17 +926,22 @@ def make_charts(result: dict, report_dir: Path) -> None:
     plt.tight_layout()
     _save(plt, report_dir / "category_agreement_kappa.png")
 
-    # (d) Single-label overview: headline metrics + pairwise Cohen kappas.
-    overall = {
-        "full agreement": single["percent_full_agreement"],
-        "mean pairwise agr.": single["mean_pairwise_percent_agreement"],
-        "Fleiss' kappa": single["fleiss_kappa"],
-        "Krippendorff alpha": single["krippendorff_alpha"],
-    }
+    # (d) Single-label overview, grouped so like is compared with like:
+    #     raw agreement (%), chance-corrected agreement (kappa/alpha), and the
+    #     per-pair Cohen kappas. Fleiss' kappa and Krippendorff's alpha coincide
+    #     for 3 balanced raters, so they share one bar (annotated) rather than
+    #     drawing two identical bars.
+    fleiss, alpha = single["fleiss_kappa"], single["krippendorff_alpha"]
+    kappa_label = "Fleiss' κ ≈ Kripp. α" if abs(fleiss - alpha) < 5e-3 else "Fleiss' κ"
     pair = single["pairwise_cohen_kappa"]
-    labels = list(overall) + list(pair)
-    values = list(overall.values()) + list(pair.values())
-    colors = ["#2e4057"] * len(overall) + ["#66a182"] * len(pair)
+    groups = [
+        ("full agreement", single["percent_full_agreement"], "#2e4057"),
+        ("mean pairwise agr.", single["mean_pairwise_percent_agreement"], "#2e4057"),
+        (kappa_label, fleiss, "#edae49"),
+    ] + [(f"Cohen κ: {k}", v, "#66a182") for k, v in pair.items()]
+    labels = [g[0] for g in groups]
+    values = [g[1] for g in groups]
+    colors = [g[2] for g in groups]
     plt.figure(figsize=(12, 6))
     bars = plt.bar(range(len(labels)), values, color=colors)
     for rect, v in zip(bars, values):
@@ -682,6 +951,13 @@ def make_charts(result: dict, report_dir: Path) -> None:
     plt.ylim(0, 1)
     plt.ylabel("Score")
     plt.title("Single-label agreement on primary_category")
+    # legend clarifies the three metric families (colour = family).
+    from matplotlib.patches import Patch
+    plt.legend(handles=[
+        Patch(color="#2e4057", label="raw agreement"),
+        Patch(color="#edae49", label="chance-corrected (κ / α)"),
+        Patch(color="#66a182", label="per-pair Cohen κ"),
+    ], loc="upper right")
     plt.tight_layout()
     _save(plt, report_dir / "single_label_agreement.png")
 
@@ -734,6 +1010,107 @@ def make_charts(result: dict, report_dir: Path) -> None:
         ax.set_title(f"Per-category agreement with reference LLM ({ref['reference']})")
         plt.tight_layout()
         _save(plt, report_dir / "reference_category_kappa.png")
+
+    maint = result.get("maintenance_agreement")
+    if maint:
+        _maintenance_charts(maint, plt, report_dir)
+
+
+def _maintenance_charts(maint: dict, plt, report_dir: Path) -> None:
+    """Render the maintenance-reason agreement figures."""
+    # (g) Base type vs parent class: same headline metrics side by side. The
+    #     expectation is that the 2-class split agrees more than the 5-type one.
+    metrics = [
+        ("percent_full_agreement", "full agr."),
+        ("mean_pairwise_percent_agreement", "pairwise agr."),
+        ("fleiss_kappa", "Fleiss K"),
+        ("krippendorff_alpha", "Kripp. alpha"),
+        ("mean_pairwise_cohen_kappa", "Cohen K"),
+    ]
+    base, cls = maint["base_type"], maint["parent_class"]
+    x = range(len(metrics))
+    width = 0.38
+    plt.figure(figsize=(12, 6))
+    b1 = plt.bar([xi - width / 2 for xi in x], [base[k] for k, _ in metrics],
+                 width=width, label="base type (5)", color="#2e4057")
+    b2 = plt.bar([xi + width / 2 for xi in x], [cls[k] for k, _ in metrics],
+                 width=width, label="Correction/Enhancement (2)", color="#66a182")
+    for bars in (b1, b2):
+        for rect in bars:
+            h = rect.get_height()
+            if not (isinstance(h, float) and math.isnan(h)):
+                plt.text(rect.get_x() + rect.get_width() / 2, h, f"{h:.2f}",
+                         ha="center", va="bottom", fontsize=8)
+    plt.xticks(list(x), [lab for _, lab in metrics], rotation=15, ha="right")
+    plt.ylim(0, 1)
+    plt.ylabel("Score")
+    plt.title("Maintenance-reason agreement: base type vs parent class")
+    plt.legend()
+    plt.tight_layout()
+    _save(plt, report_dir / "maintenance_agreement.png")
+
+    # (h) Per-type ambiguity: presence disagreement (bars) + Fleiss K (line).
+    per = maint["per_type"]
+    types = sorted(
+        per,
+        key=lambda t: per[t]["presence_disagreement_rate"]
+        if not math.isnan(per[t]["presence_disagreement_rate"]) else -1,
+        reverse=True,
+    )
+    disagree = [per[t]["presence_disagreement_rate"] for t in types]
+    kappa = [per[t]["fleiss_kappa"] for t in types]
+    y = list(range(len(types)))
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.barh(y, disagree, color="#d1495b")
+    ax.set_yticks(y)
+    ax.set_yticklabels(types)
+    ax.invert_yaxis()
+    ax.set_xlabel("Presence disagreement rate", color="#d1495b")
+    ax.tick_params(axis="x", colors="#d1495b")
+    ax.set_xlim(0, max(disagree) * 1.15)
+    ax.set_title("Maintenance-type ambiguity across models")
+
+    ax_k = ax.twiny()  # Fleiss' kappa on its own scale (not commensurable with rate)
+    ax_k.plot(kappa, y, "o-", color="#1b3a4b")
+    ax_k.set_xlabel("Fleiss' kappa (agreement)", color="#1b3a4b")
+    ax_k.tick_params(axis="x", colors="#1b3a4b")
+    ax_k.set_xlim(0, 1)
+
+    ax.plot([], [], color="#d1495b", linewidth=6, label="presence disagreement rate")
+    ax.plot([], [], "o-", color="#1b3a4b", label="Fleiss' kappa")
+    ax.legend(loc="lower right")
+    plt.tight_layout()
+    _save(plt, report_dir / "maintenance_type_ambiguity.png")
+
+    # (i) Maintenance reason vs the reference LLM, per study model.
+    mref = maint.get("reference_comparison")
+    if mref:
+        models = list(mref["per_model"])
+        mm = [
+            ("base_agreement", "base agr."),
+            ("base_cohen_kappa", "base K"),
+            ("class_agreement", "class agr."),
+            ("class_cohen_kappa", "class K"),
+        ]
+        x = range(len(models))
+        width = 0.2
+        palette = ["#2e4057", "#66a182", "#edae49", "#d1495b"]
+        plt.figure(figsize=(12, 6))
+        for i, (key, label) in enumerate(mm):
+            vals = [mref["per_model"][m][key] for m in models]
+            offs = [xi + (i - (len(mm) - 1) / 2) * width for xi in x]
+            bars = plt.bar(offs, vals, width=width, label=label, color=palette[i])
+            for rect, v in zip(bars, vals):
+                if not (isinstance(v, float) and math.isnan(v)):
+                    plt.text(rect.get_x() + rect.get_width() / 2, rect.get_height(),
+                             f"{v:.2f}", ha="center", va="bottom", fontsize=7)
+        plt.xticks(list(x), models, rotation=15, ha="right")
+        plt.ylim(0, 1)
+        plt.ylabel("Score")
+        plt.title(f"Maintenance reason vs reference LLM ({mref['reference']}, {mref['n_items']} diffs)")
+        plt.legend(fontsize=8)
+        plt.tight_layout()
+        _save(plt, report_dir / "maintenance_reference.png")
 
 
 def _save(plt, path: Path) -> None:
@@ -792,6 +1169,13 @@ def main() -> None:
 
     result = analyse(aligned, args.models, categories, args.threshold)
 
+    # Maintenance-reason axis (ISO/IEC/IEEE 14764), when the outputs carry it.
+    maint = analyse_maintenance(aligned, args.models)
+    if maint is None:
+        print("[maintenance] no maintenance block in outputs; skipping maintenance agreement.")
+    else:
+        result["maintenance_agreement"] = maint
+
     # Compare each study model against the reference (primary) LLM, on the
     # diffs all study models AND the reference classified.
     if not args.no_reference and args.reference:
@@ -808,6 +1192,12 @@ def main() -> None:
             result["reference_comparison"] = analyse_vs_reference(
                 ref_aligned, ref_records, args.models, args.reference, categories, args.threshold
             )
+            if maint is not None:
+                maint_ref = analyse_maintenance_vs_reference(
+                    ref_aligned, ref_records, args.models, args.reference
+                )
+                if maint_ref is not None:
+                    result["maintenance_agreement"]["reference_comparison"] = maint_ref
 
     print_report(result)
 
