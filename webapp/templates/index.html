@@ -341,29 +341,9 @@
             </button>
 
             <div id="multi-model-dashboard" style="display: none; gap: 1.5rem; margin-top: 2rem; width: 100%; justify-content: space-around;"></div>
-            </section>
-
-        <section id="diff-viewer">
-            
-            <div style="display: flex; align-items: flex-start; justify-content: space-between; background: rgba(22,11,35,0.6); padding: 1rem 2rem; border-radius: 20px; border: 1px solid rgba(250,208,9,0.3);">
-                <button id="prev-btn" class="cta" onclick="prevDiff()">&#8592; Previous</button>
-                <div style="text-align: center; overflow: hidden;">
-                    <h3 id="diff-id-display" style="color: var(--brand-yellow); margin: 0; font-size: 1.3rem;">Commit: ...</h3>
-                    <p id="diff-msg-display" style="margin: 0.3rem 0 0 0; font-size: 0.95rem; max-width: 500px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.7);"></p>
-                </div>
-                <button id="next-btn" class="cta" onclick="nextDiff()">Next &#8594;</button>
-            </div>
-
-            <div id="results-container" class="results"></div>
-
-            <div class="maintenance-card">
-                <h3 style="color: var(--brand-pink); text-align: center; margin-top: 0; font-size: 1.3rem; border-bottom: 1px solid rgba(255,255,255,0.15); padding-bottom: 0.5rem; text-transform: uppercase;">Software Maintenance</h3>
-                <div id="maint-content" style="display: grid; gap: 2rem; margin-top: 1rem; align-items: start;">
-                    </div>
-            </div>
         </section>
 
-        <section id="past-analysis-view" style="display: none; flex-direction: column; gap: 2rem; align-items: center; margin-top: 2rem; z-index: 2;">
+                <section id="past-analysis-view" style="display: none; flex-direction: column; gap: 2rem; align-items: center; margin-top: 2rem; z-index: 2;">
             <h2 class="prompt-headline" style="font-size: 2rem; text-align: center; color: var(--brand-pink);">Our Full Analysis</h2>
             <p style="text-align: center; line-height: 1.6;">In this section, you can view summary graphics of our dataset analysis</p>
             
@@ -524,9 +504,57 @@
             </div>
         </section>
 
+        <section id="diff-viewer">
+
+            <div id="gemma-kpis" style="display: none; width: 100%;"></div>
+
+            <div style="display: flex; align-items: flex-start; justify-content: space-between; background: rgba(22,11,35,0.6); padding: 1rem 2rem; border-radius: 20px; border: 1px solid rgba(250,208,9,0.3);">
+                <button id="prev-btn" class="cta" onclick="prevDiff()">&#8592; Previous</button>
+                <div style="text-align: center; overflow: hidden;">
+                    <h3 id="diff-id-display" style="color: var(--brand-yellow); margin: 0; font-size: 1.3rem;">Commit: ...</h3>
+                    <p id="diff-msg-display" style="margin: 0.3rem 0 0 0; font-size: 0.95rem; max-width: 500px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.7);"></p>
+                </div>
+                <button id="next-btn" class="cta" onclick="nextDiff()">Next &#8594;</button>
+            </div>
+
+            <div id="results-container" class="results"></div>
+
+            <div class="maintenance-card">
+                <h3 style="color: var(--brand-pink); text-align: center; margin-top: 0; font-size: 1.3rem; border-bottom: 1px solid rgba(255,255,255,0.15); padding-bottom: 0.5rem; text-transform: uppercase;">Software Maintenance</h3>
+                <div id="maint-content" style="display: grid; gap: 2rem; margin-top: 1rem; align-items: start;">
+                    </div>
+            </div>
+        </section>
+
+        <footer style="margin-top: auto; padding-top: 4rem; text-align: center; border-top: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 1rem; align-items: center; z-index: 10;">
+            <a href="https://github.com/TheOverfitters/ContextWare" target="_blank" style="color: var(--brand-pink); text-decoration: none; font-weight: bold; font-size: 1.1rem; transition: filter 0.2s;" onmouseover="this.style.filter='brightness(1.3)'" onmouseout="this.style.filter='brightness(1)'">
+                View ContextWare on GitHub
+            </a>
+            <button onclick="openAboutModal()" style="background: none; border: none; color: rgba(248, 244, 252, 0.7); text-decoration: underline; cursor: pointer; font-family: inherit; font-size: 0.95rem; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(248, 244, 252, 0.7)'">
+                Why we built ContextWare & Our Goal
+            </button>
+        </footer>
+
+        <div id="about-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); z-index: 3000; justify-content: center; align-items: center; backdrop-filter: blur(10px);">
+            <div style="background: linear-gradient(150deg, rgba(44, 13, 42, 0.95), rgba(22, 11, 35, 0.95)); border: 1px solid rgba(250, 208, 9, 0.3); padding: 2.5rem; border-radius: 20px; max-width: 650px; width: 90%; position: relative; box-shadow: 0 24px 70px rgba(0,0,0,0.8);">
+                <div onclick="closeAboutModal()" style="position: absolute; top: 1rem; right: 1.5rem; color: rgba(255,255,255,0.5); font-size: 2.5rem; cursor: pointer; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='rgba(255,255,255,0.5)'">&times;</div>
+                
+                <h2 style="color: var(--brand-yellow); margin-top: 0; font-size: 1.8rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 1rem;">About ContextWare</h2>
+                
+                <p style="line-height: 1.7; color: var(--text-soft); font-size: 1.05rem; margin-top: 1.5rem;">
+                    <strong>ContextWare</strong> was developed by <em>The Overfitters</em> to bridge a critical gap in software engineering analytics: understanding the true contextual intent behind code changes
+                </p>
+                <p style="line-height: 1.7; color: var(--text-soft); font-size: 1.05rem;">
+                    <strong>Our Goal:</strong> To leverage Large Language Models (LLMs) to automatically classify commits, parse maintenance lifecycles, and extract rich contextual metadata directly from a repository's history. 
+                </p>
+                <p style="line-height: 1.7; color: var(--text-soft); font-size: 1.05rem;">
+                    By simultaneously cross-validating outputs across multiple models, ContextWare ensures high-fidelity, bias-resistant insights. This empowers teams to reduce technical debt, track software evolution accurately, and improve long-term project maintainability
+                </p>
+            </div>
+        </div>
+
     </main>
 
-    <!-- Image Modal -->
     <div id="image-modal" onclick="closeModal()">
         <div id="modal-close" onclick="closeModal()">&times;</div>
         <img id="modal-img" src="" alt="Full size analysis">
@@ -536,6 +564,68 @@
         let eventSource;
         let analysedDiffs = [];
         let currentDiffIndex = 0;
+
+        // Reusable graphical KPI tiles
+        function statRow(tiles) {
+            return `<div style="display:flex; gap:1rem; flex-wrap:wrap; justify-content:center; width:100%;">
+                ${tiles.map(([label, value, accent]) => `
+                    <div style="flex:1; min-width:150px; max-width:240px; background:linear-gradient(150deg, rgba(97,114,197,0.18), rgba(44,13,42,0.35)); border:1px solid rgba(255,255,255,0.18); border-radius:18px; padding:1.1rem 1rem; text-align:center; box-shadow:0 12px 30px rgba(9,7,20,0.45);">
+                        <div style="font-size:0.72rem; letter-spacing:0.08em; text-transform:uppercase; color:rgba(248,244,252,0.7); margin-bottom:0.5rem;">${label}</div>
+                        <div style="font-size:1.6rem; font-weight:800; color:${accent}; word-break:break-word; line-height:1.1;">${value}</div>
+                    </div>`).join('')}
+            </div>`;
+        }
+
+        const CHART_PALETTE = ['#ed2ea5', '#6172c5', '#fa8057', '#fad009', '#4ade80', '#a78bfa', '#f472b6', '#38bdf8'];
+
+        // A single chart card with horizontal bars for {label: count} data
+        function barChartCard(title, entries) {
+            const max = Math.max(1, ...entries.map(e => e[1]));
+            const rows = entries.map(([label, value], i) => {
+                const w = (value / max * 100).toFixed(1);
+                const color = CHART_PALETTE[i % CHART_PALETTE.length];
+                return `
+                    <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.6rem;">
+                        <div title="${label}" style="flex:0 0 42%; font-size:0.8rem; color:rgba(248,244,252,0.88); text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${label}</div>
+                        <div style="flex:1; background:rgba(255,255,255,0.09); border-radius:8px; height:16px; overflow:hidden;">
+                            <div style="width:${w}%; height:100%; background:${color}; border-radius:8px; transition:width 0.9s ease;"></div>
+                        </div>
+                        <div style="flex:0 0 1.8rem; font-size:0.82rem; font-weight:700; color:#fff; text-align:left;">${value}</div>
+                    </div>`;
+            }).join('');
+            return `
+                <article class="result-card" style="width:24rem; min-height:auto; max-height:none;">
+                    <header class="card-head"><span class="chip">${title}</span></header>
+                    <div style="padding-top:0.6rem;">${rows || '<p style="text-align:center; color:rgba(255,255,255,0.5);">No data</p>'}</div>
+                </article>`;
+        }
+
+        // Aggregate all analysed diffs into distribution charts
+        function renderGemmaKPIs() {
+            const container = document.getElementById('gemma-kpis');
+            if (!analysedDiffs.length) { container.style.display = 'none'; return; }
+
+            const primaryCat = {}, maintType = {}, maintClass = {};
+            analysedDiffs.forEach(d => {
+                const top = (d.results && d.results.length) ? d.results[0] : null;
+                if (top) primaryCat[top.category] = (primaryCat[top.category] || 0) + 1;
+                const m = d.maintenance || {};
+                if (m.maintenance_base_type) maintType[m.maintenance_base_type] = (maintType[m.maintenance_base_type] || 0) + 1;
+                if (m.maintenance_class) maintClass[m.maintenance_class] = (maintClass[m.maintenance_class] || 0) + 1;
+            });
+            const sortDesc = obj => Object.entries(obj).sort((a, b) => b[1] - a[1]);
+
+            container.innerHTML = `
+                <h3 class="prompt-headline" style="text-align:center; color:var(--brand-yellow); margin:0 0 1.2rem 0;">
+                    Repository Overview — ${analysedDiffs.length} commits analysed
+                </h3>
+                <div class="results" style="margin-bottom:1.5rem;">
+                    ${barChartCard('Primary Category (per commit)', sortDesc(primaryCat))}
+                    ${barChartCard('Maintenance Type (per commit)', sortDesc(maintType))}
+                    ${barChartCard('Maintenance Class', sortDesc(maintClass))}
+                </div>`;
+            container.style.display = 'block';
+        }
 
         function showPastAnalysis() {
             document.body.classList.remove('show-results');
@@ -550,9 +640,37 @@
 
             analysedDiffs = [];
             currentDiffIndex = 0;
-            
+
+            // Reset Single Model UI
             document.body.classList.remove('show-results');
             document.getElementById('diff-viewer').style.display = 'none';
+            const kpiBox = document.getElementById('gemma-kpis');
+            if (kpiBox) { kpiBox.style.display = 'none'; kpiBox.innerHTML = ''; }
+            
+            // Hide the final validation report
+            const reportView = document.getElementById('past-analysis-view');
+            if (reportView) reportView.style.display = 'none';
+            
+            // Hide and clear the loading dashboard from the previous run
+            const multiDashboard = document.getElementById('multi-model-dashboard');
+            if (multiDashboard) {
+                multiDashboard.style.display = 'none';
+                multiDashboard.innerHTML = ''; 
+            }
+            
+            // Hide the Commit Explorer dividers
+            const viewerDivider = document.getElementById('viewer-divider');
+            if (viewerDivider) viewerDivider.style.display = 'none';
+            const viewerTitle = document.getElementById('viewer-title');
+            if (viewerTitle) viewerTitle.style.display = 'none';
+            
+            // Reset the Multi-Model Button to its default state
+            const multiBtn = document.getElementById('multi-model-btn');
+            if (multiBtn) {
+                multiBtn.style.display = 'none';
+                multiBtn.innerText = "Run Multi-Model Validation";
+                multiBtn.disabled = false;
+            }
             
             const statusMsg = document.getElementById('status-message');
             const btn = document.getElementById('analyse-btn');
@@ -581,7 +699,7 @@
                     document.getElementById('diff-viewer').style.display = 'flex';
                     renderDiff(0);
                 } else {
-                    // Update navigation only, to reflect the new total count
+                    // Update navigation only to reflect the new total count
                     updateNav();
                 }
             });
@@ -607,7 +725,10 @@
                 multiBtn.style.display = 'block';
                 multiBtn.style.margin = '20px auto 0 auto';
                 multiBtn.className = 'cta';
-                
+
+                // Aggregate KPI tiles for the whole repo history
+                renderGemmaKPIs();
+
                 eventSource.close();
             });
 
@@ -790,10 +911,11 @@
             dashboard.style.display = 'flex';
             dashboard.innerHTML = "";
 
-            // Dictionary to hold our UI elements for each model
+            // Dictionary to hold UI elements for each model
             const modelsUI = {};
 
-            const multiEventSource = new EventSource('/stream_multi_model');
+            const repoUrl = document.getElementById('prompt-input').value;
+            const multiEventSource = new EventSource(`/stream_multi_model?repo=${encodeURIComponent(repoUrl)}`);
 
             multiEventSource.addEventListener('multi_status', function(event) {
                 const data = JSON.parse(event.data);
@@ -806,8 +928,9 @@
                     const content = match[2];
 
                     if (modelName.toLowerCase() === 'analysis') {
-                        multiModelBtn.innerText = content; // Show analysis progress on the button instead
-                        return; // Exit early
+                        // Show analysis progress on the button
+                        multiModelBtn.innerText = content;
+                        return;
                     }
 
                     if (!modelsUI[modelName]) {
@@ -816,7 +939,7 @@
                         card.style.minHeight = '150px';
                         card.style.maxHeight = '300px';
                         
-                        // If it's the analysis phase, style it differently (Gold)
+                        // If it's the analysis phase, style it differently
                         const isAnalysis = modelName.toLowerCase() === 'analysis';
                         const chipColor = isAnalysis ? 'var(--brand-yellow)' : 'var(--brand-blue)';
                         
@@ -870,26 +993,29 @@
                         ui.progressBar.style.width = '100%';
                         ui.progressBar.style.background = '#4ade80';
                     }
-                    else {
-                        // General status updates (especially useful for the Analysis block)
-                        ui.statusText.innerText = content.substring(0, 45) + '...';
-                        ui.progressBar.style.width = '50%'; // Indeterminate state
-                    }
                 }
             });
 
             multiEventSource.addEventListener('multi_complete', async function(event) {
                 const data = JSON.parse(event.data);
-                multiModelBtn.innerText = "Validation Finished";
+                
+                // Hide the button and the dashboard cards
+                document.getElementById('multi-model-btn').style.display = 'none';
+                document.getElementById('multi-model-dashboard').style.display = 'none';
+                
                 multiEventSource.close();
 
                 if (data.report_id) {
                     try {
                         const res = await fetch(`/static/reports/${data.report_id}/summary.json`);
-                        const summary = await res.json();
+                        const raw = await res.text();
+                        const cleaned = raw.replace(/\bNaN\b/g, 'null').replace(/-?\bInfinity\b/g, 'null');
+                        const summary = JSON.parse(cleaned);
                         renderDynamicDashboard(data.report_id, summary);
                     } catch(err) {
                         console.error("Failed to fetch report summary", err);
+                        // Optional fallback text if it fails
+                        document.getElementById('status-message').innerText = "Report unavailable — check server logs";
                     }
                 }
             });
@@ -903,55 +1029,196 @@
             });
         });
 
+        // Per-category card: bars equals RAW agreement 1 - presence disagreement,
+        // with κ and prevalence shown as muted context so κ never headlines
+        function categoryAgreementCard(title, rows) {
+            const body = rows.map((r, i) => {
+                const w = Math.round(r.raw * 100);
+                const color = CHART_PALETTE[i % CHART_PALETTE.length];
+                const kTxt = Number.isFinite(r.kappa) ? r.kappa.toFixed(2) : '—';
+                return `
+                    <div style="margin-bottom:0.7rem;">
+                        <div style="display:flex; justify-content:space-between; font-size:0.78rem; margin-bottom:0.22rem;">
+                            <span title="${r.label}" style="color:rgba(248,244,252,0.9); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:58%;">${r.label}</span>
+                            <span style="color:rgba(255,255,255,0.55);">κ ${kTxt} · prev ${Math.round(r.prev * 100)}%</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:0.5rem;">
+                            <div style="flex:1; background:rgba(255,255,255,0.09); border-radius:8px; height:14px; overflow:hidden;">
+                                <div style="width:${w}%; height:100%; background:${color}; border-radius:8px; transition:width 0.9s ease;"></div>
+                            </div>
+                            <span style="flex:0 0 2.6rem; font-size:0.8rem; font-weight:700; color:#fff; text-align:right;">${w}%</span>
+                        </div>
+                    </div>`;
+            }).join('');
+            return `
+                <article class="result-card" style="width:28rem; min-height:auto; max-height:none;">
+                    <header class="card-head"><span class="chip">${title}</span></header>
+                    <div style="padding-top:0.6rem;">${body || '<p style="text-align:center;color:rgba(255,255,255,0.5);">None</p>'}</div>
+                </article>`;
+        }
+
+        // Card listing the 0 prevalence categories, kept out of the headline
+        function trivialAgreementCard(cats) {
+            const list = cats.length
+                ? cats.map(c => `<div>• ${c} <span style="color:rgba(255,255,255,0.4)">— all raters "absent"</span></div>`).join('')
+                : '<div style="color:rgba(255,255,255,0.5)">None</div>';
+            return `
+                <article class="result-card secondary" style="width:22rem; min-height:auto; max-height:none;">
+                    <header class="card-head"><span class="chip">Trivial (≈never present)</span></header>
+                    <div style="padding-top:0.6rem; font-size:0.85rem; color:rgba(248,244,252,0.78); line-height:1.7;">${list}</div>
+                    <p style="margin-top:0.7rem; font-size:0.72rem; color:rgba(255,255,255,0.45);">κ is undefined/inflated with no positive cases — excluded from the headline.</p>
+                </article>`;
+        }
+
+        // Per-model card with bar = raw agreement vs the reference, context on κ and prevalence
+        function refAgreementCard(title, rows) {
+            const body = rows.map((r, i) => {
+                const w = Math.round(r.pct * 100);
+                const color = CHART_PALETTE[i % CHART_PALETTE.length];
+                return `
+                    <div style="margin-bottom:0.9rem;">
+                        <div style="display:flex; justify-content:space-between; font-size:0.82rem; margin-bottom:0.24rem;">
+                            <span title="${r.label}" style="color:rgba(248,244,252,0.92); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:58%;">${r.label}</span>
+                            <span style="color:rgba(255,255,255,0.55);">${r.context}</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:0.5rem;">
+                            <div style="flex:1; background:rgba(255,255,255,0.09); border-radius:8px; height:16px; overflow:hidden;">
+                                <div style="width:${w}%; height:100%; background:${color}; border-radius:8px; transition:width 0.9s ease;"></div>
+                            </div>
+                            <span style="flex:0 0 2.6rem; font-size:0.82rem; font-weight:700; color:#fff; text-align:right;">${w}%</span>
+                        </div>
+                    </div>`;
+            }).join('');
+            return `
+                <article class="result-card" style="width:26rem; min-height:auto; max-height:none;">
+                    <header class="card-head"><span class="chip">${title}</span></header>
+                    <div style="padding-top:0.6rem;">${body || '<p style="text-align:center;color:rgba(255,255,255,0.5);">No data</p>'}</div>
+                </article>`;
+        }
+
         function renderDynamicDashboard(reportId, summary) {
-            document.getElementById('diff-viewer').style.display = 'none';
-            
             const reportView = document.getElementById('past-analysis-view');
             reportView.style.display = 'flex';
             reportView.style.marginTop = '4rem';
             
             const basePath = `/static/reports/${reportId}`;
-            
-            const pct = (summary.single_label_primary.percent_full_agreement * 100).toFixed(1);
+
+            const slp = summary.single_label_primary || {};
+            const pairPct = Number.isFinite(slp.mean_pairwise_percent_agreement)
+                ? (slp.mean_pairwise_percent_agreement * 100).toFixed(1) : '—';
+            const fullPct = Number.isFinite(slp.percent_full_agreement)
+                ? (slp.percent_full_agreement * 100).toFixed(1) : '—';
+            const fleiss = Number.isFinite(slp.fleiss_kappa) ? slp.fleiss_kappa.toFixed(2) : '—';
+            const cohen = Number.isFinite(slp.mean_pairwise_cohen_kappa)
+                ? slp.mean_pairwise_cohen_kappa.toFixed(2) : '—';
+
+            const agreementKPIs = statRow([
+                ['Mean pairwise agreement', pairPct === '—' ? '—' : pairPct + '%', 'var(--brand-yellow)'],
+                ['Full agreement (all 3)', fullPct === '—' ? '—' : fullPct + '%', 'var(--brand-pink)'],
+                ["Mean Cohen's κ", cohen, 'var(--brand-orange)'],
+                ["Fleiss' κ", fleiss, 'var(--brand-blue)'],
+                ['Models', summary.n_raters ?? '—', 'var(--brand-blue)'],
+                ['Commits', summary.n_items ?? '—', 'var(--brand-pink)'],
+            ]);
+
+            // Split per-category stats: informative prevalence > 0 vs trivial
+            const perCat = (summary.multi_label_threshold && summary.multi_label_threshold.per_category) || {};
+            const PREV_EPS = 0.01;
+            const present = [], trivial = [];
+            Object.entries(perCat).forEach(([label, m]) => {
+                const prev = m.prevalence || 0;
+                if (prev <= PREV_EPS) {
+                    trivial.push(label);
+                } else {
+                    present.push({
+                        label,
+                        raw: 1 - (m.presence_disagreement_rate || 0),
+                        kappa: m.fleiss_kappa,
+                        prev,
+                    });
+                }
+            });
+            present.sort((a, b) => b.raw - a.raw);
+
+            const categorySection = `
+                <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
+                <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-yellow);">Per-Category Agreement</h2>
+                <p style="text-align: center; line-height: 1.6; max-width: 760px; margin-bottom: 1.5rem;">
+                    Ranked by <strong>raw agreement</strong> (share of commits where all raters agree on presence). κ is shown only as context — categories that essentially never appear are listed apart, since κ is meaningless there
+                </p>
+                <div class="results">
+                    ${categoryAgreementCard('Raw agreement by category', present)}
+                    ${trivialAgreementCard(trivial)}
+                </div>
+            `;
+
+            // Agreement of each study model vs the Gemma reference: category + maintenance
+            const refCat = summary.reference_comparison;
+            const refMaint = summary.maintenance_agreement && summary.maintenance_agreement.reference_comparison;
+            const shortModel = (m) => String(m).replace(/:cloud$/, '').replace(/-code$/, '');
+            let referenceSection;
+            if (refCat && refCat.per_model) {
+                const models = Object.keys(refCat.per_model);
+                const catRows = models.map(m => {
+                    const c = refCat.per_model[m] || {};
+                    const k = Number.isFinite(c.primary_cohen_kappa) ? c.primary_cohen_kappa.toFixed(2) : '—';
+                    const j = Number.isFinite(c.mean_jaccard) ? c.mean_jaccard.toFixed(2) : '—';
+                    return { label: shortModel(m), pct: c.primary_agreement || 0, context: `κ ${k} · Jaccard ${j}` };
+                });
+                const maintRows = (refMaint && refMaint.per_model) ? models.map(m => {
+                    const c = (refMaint.per_model[m]) || {};
+                    const bk = Number.isFinite(c.base_cohen_kappa) ? c.base_cohen_kappa.toFixed(2) : '—';
+                    const cls = Number.isFinite(c.class_agreement) ? Math.round(c.class_agreement * 100) + '%' : '—';
+                    return { label: shortModel(m), pct: c.base_agreement || 0, context: `class ${cls} · κ ${bk}` };
+                }) : [];
+
+                referenceSection = `
+                    <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
+                    <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-pink);">Agreement vs Gemma (reference)</h2>
+                    <p style="text-align: center; line-height: 1.6; max-width: 760px; margin-bottom: 1.5rem;">
+                        How closely each study model matches the primary <strong>Gemma</strong> classification on the same <strong>${refCat.n_items}</strong> commits. Bars = raw agreement; κ shown as context
+                    </p>
+                    <div class="results">
+                        ${refAgreementCard('Category — primary match vs Gemma', catRows)}
+                        ${maintRows.length ? refAgreementCard('Maintenance — base type match vs Gemma', maintRows) : ''}
+                    </div>
+                `;
+            } else {
+                referenceSection = `
+                    <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
+                    <p style="text-align:center; color:rgba(255,255,255,0.6); max-width:720px; margin:0 auto;">
+                        No Gemma reference comparison in this report. Analyse the repo with Gemma first, then re-run validation
+                        (append <code>?refresh=1</code>) to benchmark the 3 models against Gemma
+                    </p>
+                `;
+            }
 
             reportView.innerHTML = `
                 <hr style="width: 100%; border-color: rgba(255,255,255,0.1); margin: 1rem 0 3rem 0;">
                 <h2 class="prompt-headline" style="font-size: 2.5rem; text-align: center; color: var(--brand-pink);">Validation Complete</h2>
                 <p style="text-align: center; font-size: 1.2rem; line-height: 1.6; max-width: 700px;">
-                    Inter-model agreement analysis successfully compiled across <strong>${summary.n_raters}</strong> distinct LLMs 
-                    analysing <strong>${summary.n_items}</strong> commits. 
-                    <br><span style="color: var(--brand-yellow);">Total Model Agreement: ${pct}%</span>
+                    Inter-model agreement analysis successfully compiled across <strong>${summary.n_raters}</strong> distinct LLMs
+                    analysing <strong>${summary.n_items}</strong> commits
                 </p>
+                <div style="width: 100%; max-width: 1000px; margin: 0 auto;">${agreementKPIs}</div>
 
-                <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%; margin-top: 2rem;">
-                    
-                    <div class="result-card zoomable" onclick="openModal('${basePath}/category_ambiguity.png')" style="min-height: 250px; width: 25rem; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
-                        <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Category Ambiguity</h3>
-                        <img src="${basePath}/category_ambiguity.png" onerror="this.parentElement.style.display='none'" alt="Category Ambiguity" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
-                    </div>
+                ${categorySection}
 
-                    <div class="result-card secondary zoomable" onclick="openModal('${basePath}/single_label_agreement.png')" style="min-height: 250px; width: 25rem; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
-                        <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Single-Label Agreement</h3>
-                        <img src="${basePath}/single_label_agreement.png" onerror="this.parentElement.style.display='none'" alt="Single Label Agreement" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
-                    </div>
-
-                    <div class="result-card zoomable" onclick="openModal('${basePath}/category_entropy.png')" style="min-height: 250px; width: 25rem; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
-                        <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Disagreement Entropy</h3>
-                        <img src="${basePath}/category_entropy.png" onerror="this.parentElement.style.display='none'" alt="Category Entropy" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
-                    </div>
-                    
-                    <div class="result-card secondary zoomable" onclick="openModal('${basePath}/reference_comparison.png')" style="min-height: 250px; width: 25rem; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
-                        <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Reference vs Study Models</h3>
-                        <img src="${basePath}/reference_comparison.png" onerror="this.parentElement.style.display='none'" alt="Reference Comparison" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
-                    </div>
-
-                </div>
+                ${referenceSection}
             `;
 
             setTimeout(() => {
                 reportView.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }, 200);
         }
+
+        window.openAboutModal = function() {
+            document.getElementById('about-modal').style.display = 'flex';
+        };
+
+        window.closeAboutModal = function() {
+            document.getElementById('about-modal').style.display = 'none';
+        };
     </script>
 </body>
 </html>

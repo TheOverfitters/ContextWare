@@ -2,6 +2,7 @@ import asyncio
 import asyncio.subprocess
 import json
 import os
+import shutil
 import httpx
 import re
 from datetime import datetime
@@ -16,11 +17,20 @@ target_folder = Path(__file__).resolve().parent / '../acf-analysis'
 sys.path.append(str(target_folder))
 
 from acf_analyser import classify_diff, _check_context_budget
-from acf_io import load_label_descriptions, load_categories, load_ollama_api_key
+from acf_io import load_label_descriptions, load_categories, load_ollama_api_key, sanitize_model_name, load_maintenance_descriptions
 from acf_prompt import get_system_prompt, DEFAULT_CATEGORIES, DEFAULT_MAINTENANCE_TYPES, DEFAULT_LEAF_TO_CLASS, DEFAULT_LEAF_TO_BASE
 from ollama_client import SlidingRateLimiter
 from acf_io import load_dotenv_file
-load_dotenv_file(Path("../.env"))
+
+
+_SERVER_DIR = Path(__file__).resolve().parent
+for _env_candidate in (
+    _SERVER_DIR / ".env",                       # webapp/.env
+    _SERVER_DIR.parent / ".env",                # repo-root/.env
+    _SERVER_DIR.parent / ".contextWare" / ".env",  # repo-root/.contextWare/.env
+):
+    load_dotenv_file(_env_candidate)
+
 api_key = os.environ.get("OLLAMA_API_KEY", "")
 
 app = Quart(__name__)
@@ -50,7 +60,7 @@ class MockArgs:
     retry_on_zero_flags = False
     no_prefill = True
     debug_raw_response = True
-    temperature = 0.3
+    temperature = 0.0
     top_p = 1.0
     timeout_seconds = 90
     retry_per_prompt = 3
@@ -71,6 +81,35 @@ class MockArgs:
     diff_retry_on_missing_list = 3
 
 args = MockArgs()
+
+
+MEMORY_DIR = Path(__file__).resolve().parent / "memory"
+STATIC_REPORTS_DIR = (
+    Path(app.static_folder) / "reports"
+    if app.static_folder
+    else Path(__file__).resolve().parent / "static" / "reports"
+)
+
+# Create the cache roots at startup so they are visible immediately, even
+# before the first analysis writes anything into them
+MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+STATIC_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _safe_name(name: str) -> str:
+    """Make a string usable as a file/folder name (Windows-safe: no ':')."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._-") or "item"
+
+
+def repo_slug(repo_url: str) -> str:
+    """Turn a GitHub URL into a stable 'owner__repo' folder key."""
+    match = re.search(r"github\.com/([^/]+)/([^/]+)", (repo_url or "").rstrip("/"))
+    if not match:
+        raise ValueError(f"Invalid Github URL: {repo_url}")
+    owner, repo = match.groups()
+    repo = repo.replace(".git", "")
+    return _safe_name(f"{owner}__{repo}")
+
 
 async def fetch_github_diffs(repo_url: str, max_diffs: int = 50):
     # URL parsing
@@ -153,7 +192,33 @@ async def fetch_github_diffs(repo_url: str, max_diffs: int = 50):
     return diffs_list
 
 
-def run_acf_analyser(diff_data):
+_CATEGORIES_PATH = _SERVER_DIR.parent / "categories.json"
+_MR_PATH = _SERVER_DIR.parent / "modification_request.json"
+
+_label_categories, _label_descriptions, _label_examples = load_label_descriptions(_CATEGORIES_PATH)
+CATEGORIES = load_categories(None, _label_categories or DEFAULT_CATEGORIES)
+
+_maint = load_maintenance_descriptions(_MR_PATH)
+MAINTENANCE_TYPES = _maint["types"] or list(DEFAULT_MAINTENANCE_TYPES)
+LEAF_TO_CLASS = _maint["leaf_to_class"] or dict(DEFAULT_LEAF_TO_CLASS)
+LEAF_TO_BASE = _maint["leaf_to_base"] or dict(DEFAULT_LEAF_TO_BASE)
+
+SYSTEM_PROMPT = get_system_prompt(
+    CATEGORIES,
+    _label_descriptions,
+    _label_examples,
+    maintenance_types=MAINTENANCE_TYPES,
+    maintenance_descriptions=_maint["descriptions"],
+    maintenance_examples=_maint["examples"],
+    maintenance_classes=_maint["classes"] or None,
+    maintenance_class_descriptions=_maint["class_descriptions"],
+)
+print(f"[webapp] Gemma context: {len(CATEGORIES)} categories, "
+      f"{len(MAINTENANCE_TYPES)} maintenance types, "
+      f"{len(_maint['descriptions'])} maintenance descriptions from {_MR_PATH.name}")
+
+
+def run_acf_analyser(diff_data, prior_changes=None):
     """Synchronous wrapper to execute the acf_analyser pipeline in a separate thread"""
     # Load categories and prompt
     label_categories, label_descriptions, label_examples = load_label_descriptions(Path("categories.json"))
@@ -178,13 +243,14 @@ def run_acf_analyser(diff_data):
     record = classify_diff(
         diff=diff_data,
         args=args,
-        categories=categories,
-        maintenance_types=list(DEFAULT_MAINTENANCE_TYPES),
-        leaf_to_class=dict(DEFAULT_LEAF_TO_CLASS),
-        leaf_to_base=dict(DEFAULT_LEAF_TO_BASE),
-        system_prompt=system_prompt,
+        categories=CATEGORIES,
+        maintenance_types=MAINTENANCE_TYPES,
+        leaf_to_class=LEAF_TO_CLASS,
+        leaf_to_base=LEAF_TO_BASE,
+        system_prompt=SYSTEM_PROMPT,
         api_key=api_key,
-        rate_limiter=rate_limiter
+        rate_limiter=rate_limiter,
+        prior_changes=prior_changes,
     )
     return record
 
@@ -195,39 +261,125 @@ async def index():
 @app.route('/stream')
 async def stream():
     repo_url = request.args.get('repo', '')
+    # Force a re-run even when a cached result exists
+    refresh = bool(request.args.get('refresh'))
 
     async def generate_events():
         try:
-            yield f"event: status\ndata: {json.dumps({'message': 'Searching for AGENTS.md or CLAUDE.md history on GitHub...'})}\n\n"
-            diffs_list = await fetch_github_diffs(repo_url, max_diffs=50)
-            
-            if not diffs_list:
-                yield f"event: stream_error\ndata: {json.dumps({'message': 'No textual diffs found.'})}\n\n"
+            slug = repo_slug(repo_url)
+            model_dir = MEMORY_DIR / slug / "single" / _safe_name(DEFAULT_MODEL)
+            cache_file = model_dir / "results.json"
+
+            # Load any prior progress to resume interrupted runs
+            cached = None
+            if cache_file.exists() and not refresh:
+                try:
+                    cached = json.loads(cache_file.read_text(encoding="utf-8"))
+                except Exception as read_err:
+                    print(f"[memory] could not read cache, restarting: {read_err}")
+                    cached = None
+
+            # Complete cache, replays everything and stop
+            if cached and cached.get("complete"):
+                yield f"event: status\ndata: {json.dumps({'message': 'Repository already analysed — loading results from memory...'})}\n\n"
+                cached_diffs = cached.get("diffs")
+                if cached_diffs:
+                    with open(args.diffs_json, "w", encoding="utf-8") as f:
+                        json.dump(cached_diffs, f, indent=2)
+                for payload in cached.get("results", []):
+                    yield f"event: diff_result\ndata: {json.dumps(payload)}\n\n"
+                yield f"event: complete\ndata: {json.dumps({'message': 'Analysis of the entire history completed!'})}\n\n"
                 return
 
-            # Save the diffs to disk so run_multi_model.py can read them
+            # Determine the work set: RESUME from a partial run, else fetch
+            if cached and cached.get("diffs"):
+                # Reuse the previously fetched diffs and pick up where we left off
+                diffs_list = cached["diffs"]
+                collected = cached.get("results", [])
+                processed_ids = {p.get("diff_id") for p in collected}
+                yield f"event: status\ndata: {json.dumps({'message': f'Resuming analysis — {len(processed_ids)}/{len(diffs_list)} already done...'})}\n\n"
+                # Re-emit the already-analysed diffs so the UI is fully populated
+                for payload in collected:
+                    yield f"event: diff_result\ndata: {json.dumps(payload)}\n\n"
+            else:
+                yield f"event: status\ndata: {json.dumps({'message': 'Searching for AGENTS.md or CLAUDE.md history on GitHub...'})}\n\n"
+                diffs_list = await fetch_github_diffs(repo_url, max_diffs=50)
+                if not diffs_list:
+                    yield f"event: stream_error\ndata: {json.dumps({'message': 'No textual diffs found.'})}\n\n"
+                    return
+                collected = []
+                processed_ids = set()
+
+            # Save the diffs to disk so multi-model validation can reuse them
             with open(args.diffs_json, "w", encoding="utf-8") as f:
                 json.dump(diffs_list, f, indent=2)
 
             total_diffs = len(diffs_list)
-            
+            model_dir.mkdir(parents=True, exist_ok=True)
+
+            _MAX_PRIOR = 3
+            prior_changes_by_id: dict[str, list[dict[str, str]]] = {}
+            _diffs_by_file: dict[tuple[str, str], list[dict]] = {}
+            for _d in diffs_list:
+                _key = (str(_d.get("repo", "")), str(_d.get("filename", "unknown")))
+                _diffs_by_file.setdefault(_key, []).append(_d)
+            for _items in _diffs_by_file.values():
+                _ordered = sorted(_items, key=lambda x: str(x.get("timestamp", "")))
+                _history: list[dict[str, str]] = []
+                for _d in _ordered:
+                    _did = str(_d.get("diff_id", ""))
+                    prior_changes_by_id[_did] = _history[-_MAX_PRIOR:]
+                    _history = _history + [{
+                        "commit_date": str(_d.get("timestamp", "")),
+                        "commit_message": str(_d.get("commit_message", "")),
+                    }]
+
+            def _save_progress(complete: bool) -> None:
+                # Atomic write so an interruption mid-write can
+                # never leave a half-written cache that would break the resume
+                try:
+                    tmp = cache_file.with_name(cache_file.name + ".tmp")
+                    tmp.write_text(
+                        json.dumps(
+                            {
+                                "repo": repo_url,
+                                "model": DEFAULT_MODEL,
+                                "diffs": diffs_list,
+                                "results": collected,
+                                "complete": complete,
+                            },
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
+                    os.replace(tmp, cache_file)
+                except Exception as save_err:
+                    print(f"[memory] failed to persist progress: {save_err}")
+
             for idx, diff_data in enumerate(diffs_list):
+                # Skip diffs already analysed in a previous run
+                if diff_data.get("diff_id") in processed_ids:
+                    continue
+
                 msg = f"Analysis {idx + 1}/{total_diffs} in progress (Commit: {diff_data['diff_id']})..."
                 yield f"event: status\ndata: {json.dumps({'message': msg})}\n\n"
-                
-                record = await asyncio.to_thread(run_acf_analyser, diff_data)
-                
+
+                record = await asyncio.to_thread(
+                    run_acf_analyser,
+                    diff_data,
+                    prior_changes_by_id.get(str(diff_data.get("diff_id", "")), []),
+                )
                 scores = record.get('category_scores', {})
                 flagged = record.get('flagged_categories', [])
-                
+
                 results = []
                 for cat, score in scores.items():
                     if score > 0:
                         rationale = next((f['rationale'] for f in flagged if f['category'] == cat), "Rationale not available for this score.")
                         results.append({"category": cat, "score": score, "rationale": rationale})
-                
+
                 results = sorted(results, key=lambda x: x['score'], reverse=True)
-                
+
                 payload = {
                     "diff_id": diff_data['diff_id'],
                     "filename": diff_data['filename'],
@@ -237,10 +389,15 @@ async def stream():
                     "maintenance": record.get("maintenance", {})
                 }
 
+                collected.append(payload)
+                processed_ids.add(diff_data.get("diff_id"))
+                # Persist after every diff so an interruption resumes from here
+                _save_progress(complete=False)
                 yield f"event: diff_result\ndata: {json.dumps(payload)}\n\n"
-                
+
+            _save_progress(complete=True)
             yield f"event: complete\ndata: {json.dumps({'message': 'Analysis of the entire history completed!'})}\n\n"
-            
+
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -261,6 +418,10 @@ async def stream():
 # Route for the multi-model script
 @app.route('/stream_multi_model')
 async def stream_multi_model():
+
+    repo_url = request.args.get('repo', '')
+    refresh = bool(request.args.get('refresh'))
+
     async def generate_multi_events():
         try:
             models_to_run = [
@@ -268,14 +429,33 @@ async def stream_multi_model():
                 "qwen3.5:cloud",
                 "glm-5.2:cloud",
             ]
-            
+
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            
+
             server_dir = Path(__file__).resolve().parent
             analyser_script = server_dir / "../acf-analysis/acf_analyser.py"
             agreement_script = server_dir / "../acf-analysis/agreement_analysis.py"
             output_dir = server_dir / "../acf-analysis/acf-outputs"
-            
+
+            # Per-repo caching: stable report folder keyed by the repo slug so a
+            # second validation of the same link reuses the stored images/summary
+            try:
+                slug = repo_slug(repo_url)
+            except ValueError:
+                slug = None
+            report_id = slug or timestamp
+            report_dir = STATIC_REPORTS_DIR / report_id
+            summary_file = report_dir / "summary.json"
+
+            if slug and summary_file.exists() and not refresh:
+                yield f"event: multi_status\ndata: {json.dumps({'message': 'Repository already validated — loading cached multi-model report...'})}\n\n"
+                # Re-emit a per-model event so the frontend rebuilds the 3 model
+                # cards exactly like a fresh run would
+                for model in models_to_run:
+                    yield f"event: multi_status\ndata: {json.dumps({'message': f'[{model}] DONE -> OK (cached)'})}\n\n"
+                yield f"event: multi_complete\ndata: {json.dumps({'message': 'Loaded cached validation.', 'report_id': report_id})}\n\n"
+                return
+
             env_path = server_dir / ".env"
             if not env_path.exists():
                 env_path = server_dir.parent / ".env"
@@ -304,9 +484,18 @@ async def stream_multi_model():
                         "--model", model, "--timestamp", timestamp,
                         "--diffs-json", str(args.diffs_json.resolve()),
                         "--output-dir", str(output_dir.resolve()),
-                        "--temperature", "0.0", "--env-file", str(env_path.resolve()),
-                        "--ollama-base-url", base_url
+                        "--temperature", str(args.temperature),
+                        "--env-file", str(env_path.resolve()),
+                        "--ollama-base-url", base_url,
+                        # Align the study models to the Gemma single-flow config so the
+                        # vs-Gemma comparison isolates model differences, not config
+                        "--max-diff-chars", str(args.max_diff_chars),
+                        "--max-tokens", str(args.max_tokens),
                     ]
+                    if args.use_format_schema:
+                        cmd.append("--use-format-schema")
+                    if args.no_prefill:
+                        cmd.append("--no-prefill")
                     
                     process = await asyncio.create_subprocess_exec(
                         *cmd, stdout=asyncio.subprocess.PIPE,
@@ -335,16 +524,55 @@ async def stream_multi_model():
                 tasks = [asyncio.create_task(run_model(model)) for model in models_to_run]
                 await asyncio.gather(*tasks)
 
-                # --- AGREEMENT ANALYSIS PHASE ---
+                # Archive each model's raw output under memory/<repo>/multi/<model>/
+                # so the per-repo history is kept alongside the cached report
+                if slug:
+                    for model in models_to_run:
+                        src = output_dir / sanitize_model_name(model) / f"primary_{timestamp}.jsonl"
+                        if src.exists():
+                            dst_dir = MEMORY_DIR / slug / "multi" / _safe_name(model)
+                            dst_dir.mkdir(parents=True, exist_ok=True)
+                            try:
+                                shutil.copy2(src, dst_dir / src.name)
+                            except Exception as copy_err:
+                                print(f"[memory] copy failed for {model}: {copy_err}")
+
+                # Build a Gemma reference file from the webapp's own cached results
+                # for this repo, so the agreement script can benchmark
+                # the 3 study models against Gemma on the exact same diffs
+                gemma_cache = MEMORY_DIR / (slug or "_") / "single" / _safe_name(DEFAULT_MODEL) / "results.json"
+                if slug and gemma_cache.exists():
+                    try:
+                        payloads = json.loads(gemma_cache.read_text(encoding="utf-8")).get("results", [])
+                        ref_dir = output_dir / sanitize_model_name(DEFAULT_MODEL)
+                        ref_dir.mkdir(parents=True, exist_ok=True)
+                        with (ref_dir / f"primary_{timestamp}.jsonl").open("w", encoding="utf-8") as fh:
+                            for p in payloads:
+                                cats = p.get("results", [])
+                                rec = {
+                                    "diff_id": p.get("diff_id", ""),
+                                    "primary": {"primary_category": cats[0]["category"] if cats else ""},
+                                    "category_scores": {c["category"]: c["score"] for c in cats},
+                                    "maintenance": p.get("maintenance", {}),
+                                }
+                                fh.write(json.dumps(rec, ensure_ascii=True) + "\n")
+                        await queue.put(f"event: multi_status\ndata: {json.dumps({'message': f'[Analysis] Prepared Gemma reference ({len(payloads)} diffs) for benchmarking.'})}\n\n")
+                    except Exception as ref_err:
+                        print(f"[reference] failed to build Gemma reference file: {ref_err}")
+
+                # Agreement Analysis Phase
                 await queue.put(f"event: multi_status\ndata: {json.dumps({'message': '[Analysis] Compiling inter-model agreement and ambiguity metrics...'})}\n\n")
-                
-                report_dir = Path(app.static_folder) / "reports" / timestamp if app.static_folder else Path("static/reports") / timestamp
+
                 report_dir.mkdir(parents=True, exist_ok=True)
-                
+
                 cmd_agr = [
                     sys.executable, "-u", str(agreement_script.resolve()),
                     "--timestamp", timestamp, "--output-dir", str(output_dir.resolve()),
-                    "--report-dir", str(report_dir.resolve()), "--models"
+                    "--report-dir", str(report_dir.resolve()),
+                    "--reference", DEFAULT_MODEL,
+                    # The webapp renders agreement from summary.json, not PNGs, so
+                    # skip chart generation entirely
+                    "--no-charts", "--models"
                 ] + models_to_run
                 
                 try:
@@ -364,7 +592,7 @@ async def stream_multi_model():
                     await process_agr.wait()
 
                     if process_agr.returncode == 0:
-                        await queue.put(f"event: multi_complete\ndata: {json.dumps({'message': 'Validation complete!', 'report_id': timestamp})}\n\n")
+                        await queue.put(f"event: multi_complete\ndata: {json.dumps({'message': 'Validation complete!', 'report_id': report_id})}\n\n")
                     else:
                         await queue.put(f"event: stream_error\ndata: {json.dumps({'message': f'Analysis failed with code {process_agr.returncode}'})}\n\n")
                 except Exception as e:
