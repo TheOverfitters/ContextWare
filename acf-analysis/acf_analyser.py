@@ -32,7 +32,6 @@ from acf_prompt import (
     DEFAULT_LEAF_TO_BASE,
     DEFAULT_LEAF_TO_CLASS,
     DEFAULT_MAINTENANCE_TYPES,
-    DEFAULT_MODEL,
     # SIGNAL_CATEGORY_MAP,
     # SIGNAL_PATTERNS,
     build_chat_messages,
@@ -51,10 +50,18 @@ _CATEGORY_PATTERNS: dict[str, list[str]] = {}
 from ollama_client import SlidingRateLimiter, call_chat_with_retries, fetch_model_context_size
 
 
-# Default output dir lives OUTSIDE OneDrive-synced folders: OneDrive locks files
-# mid-write while syncing, causing intermittent PermissionError on append+flush.
-# LOCALAPPDATA (C:\Users\<user>\AppData\Local) is never synced; fall back to ~ elsewhere.
-_DEFAULT_OUTPUT_DIR = Path(os.getenv("LOCALAPPDATA") or Path.home()) / "acf-outputs"
+# Repo root (this file lives in <repo>/acf-analysis/), used to resolve the CLI
+# defaults below so they work regardless of the current working directory.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+# Project-local defaults so a bare `python acf-analysis/acf_analyser.py` runs the
+# standard Gemma pass.
+# NOTE: this output dir is inside OneDrive, which can lock files mid-write while
+# syncing and cause intermittent PermissionError on append+flush. It is the
+# project's conventional location; override with --output-dir to a non-synced
+# path (e.g. under LOCALAPPDATA) if you hit sync-lock write errors.
+_DEFAULT_OUTPUT_DIR = _REPO_ROOT / "acf-analysis" / "acf-outputs"
+_DEFAULT_DIFFS_JSON = _REPO_ROOT / "outputs" / "git_history_diffs.json"
+_DEFAULT_ENV_FILE = _REPO_ROOT / ".contextWare" / ".env"
 
 
 # Parsing, classification, and chunking logic are all intertwined in this file since
@@ -69,16 +76,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--diffs-json",
         type=Path,
-        default=Path("acf_diffs.json"),
-        help="Path to a diffs JSON file, a JSONL file, or a directory of JSON files.",
+        default=_DEFAULT_DIFFS_JSON,
+        help=(
+            "Path to a diffs JSON file, a JSONL file, or a directory of JSON files. "
+            f"Default: {_DEFAULT_DIFFS_JSON}."
+        ),
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=_DEFAULT_OUTPUT_DIR,
         help=(
-            "Where to write primary/eval JSONL. Defaults to a non-OneDrive "
-            f"local path ({_DEFAULT_OUTPUT_DIR}) to avoid sync-lock write errors."
+            "Where to write primary/eval JSONL. "
+            f"Default: {_DEFAULT_OUTPUT_DIR}."
         ),
     )
     parser.add_argument(
@@ -138,8 +148,8 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Override output timestamp (YYYYMMDD_HHMMSS).",
     )
-    parser.add_argument("--env-file", type=Path, default=Path(".env"))
-    parser.add_argument("--model", type=str, default=DEFAULT_MODEL)
+    parser.add_argument("--env-file", type=Path, default=_DEFAULT_ENV_FILE)
+    parser.add_argument("--model", type=str, default="gemma4:31b-cloud")
 
     parser.add_argument(
         "--ollama-base-url",
@@ -180,22 +190,38 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--retry-on-zero-flags",
+        dest="retry_on_zero_flags",
         action="store_true",
+        default=True,
         help=(
             "Re-run the entire diff when the final classification has no flagged "
             "categories (flagged=0). Uses --retry-on-invalid as the retry count. "
-            "Useful when the model returns valid JSON but assigns 0.0 to all categories."
+            "Enabled by default; use --no-retry-on-zero-flags to disable."
         ),
     )
     parser.add_argument(
+        "--no-retry-on-zero-flags",
+        dest="retry_on_zero_flags",
+        action="store_false",
+        help="Disable re-running diffs whose final classification flagged zero categories.",
+    )
+    parser.add_argument(
         "--no-prefill",
+        dest="no_prefill",
         action="store_true",
+        default=True,
         help=(
-            "Disable assistant-prefill for the first attempt. "
-            "By default a partial '{' is injected as the last assistant message so "
-            "thinking/reasoning models produce visible JSON output instead of consuming "
-            "all tokens internally. Retries always use prefill regardless of this flag."
+            "Disable assistant-prefill for the first attempt. This is the DEFAULT. "
+            "(Prefill injects a partial '{' so thinking/reasoning models emit visible "
+            "JSON.) Retries always use prefill regardless. Use --prefill to re-enable "
+            "prefill on the first attempt."
         ),
+    )
+    parser.add_argument(
+        "--prefill",
+        dest="no_prefill",
+        action="store_false",
+        help="Re-enable assistant-prefill on the first attempt (default is no prefill).",
     )
     parser.add_argument(
         "--debug-raw-response",
@@ -217,7 +243,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--retry-on-invalid",
         type=int,
-        default=1,
+        default=5,
         help="Retry the same prompt when JSON or schema validation fails.",
     )
 

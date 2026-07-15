@@ -25,6 +25,11 @@ three cloud LLMs as an independent *rater* of the same diffs:
          the 3 raters are not unanimous about that category) and mean primary
          vote entropy among instances whose plurality primary is that category
 
+  4. Pooled agreement over the full label vector, treating the reference
+     (gemma) as a 4th rater alongside the 3 study models -- see
+     ``analyse_pooled`` for the scope, and for why this is NOT a validation of
+     the reference.
+
 All metrics are implemented in the standard library so the formulas stay
 auditable. Raters are aligned on the diffs classified by *all* models.
 
@@ -525,6 +530,101 @@ def analyse_vs_reference(
     }
 
 
+def analyse_pooled(
+    aligned: dict[str, list[dict]],
+    ref_records: dict[str, dict],
+    model_names: list[str],
+    ref_name: str,
+    categories: list[str],
+    threshold: float,
+) -> dict:
+    """Agreement over the full label vector with the reference pooled in as a rater.
+
+    Unlike ``analyse`` (3 study models) and ``analyse_vs_reference`` (reference
+    against one model at a time), this treats all 4 models as interchangeable
+    raters and reports one figure over the whole multi-label vector.
+
+    SCOPE -- this is a DESCRIPTIVE statistic only. It must not be read as
+    validating the reference: the reference is inside the pool, so it
+    contributes to the very consensus it would be measured against. Any claim
+    of the form "the reference agrees with the panel" has to come from
+    ``analyse_vs_reference``, which keeps the two roles apart.
+
+    ``pairwise_jaccard`` is the load-bearing output, not the mean: it says
+    whether the reference sits inside the spread of the study models or apart
+    from them, which the pooled mean alone cannot show. ``ref_involved`` flags
+    the pairs the reference takes part in, so the two groups stay separable
+    downstream.
+    """
+    diff_ids = [d for d in aligned if d in ref_records]
+    if not diff_ids:
+        return {}
+
+    # Reference last, so pair indices >= len(model_names) are the ref's.
+    rater_names = list(model_names) + [ref_name]
+    ref_index = len(model_names)
+    n_raters = len(rater_names)
+
+    sets_by_diff = {
+        d: [above_threshold_set(r, categories, threshold) for r in aligned[d]]
+           + [above_threshold_set(ref_records[d], categories, threshold)]
+        for d in diff_ids
+    }
+
+    # Per-pair Jaccard averaged over instances. Averaging over pairs-then-
+    # instances or instances-then-pairs coincide here (balanced grid), so the
+    # mean below stays comparable to `multi_label_threshold.mean_pairwise_jaccard`.
+    pair_jaccard: dict[tuple[int, int], float] = {}
+    for a, b in combinations(range(n_raters), 2):
+        pair_jaccard[(a, b)] = _mean(
+            [jaccard(sets_by_diff[d][a], sets_by_diff[d][b]) for d in diff_ids]
+        )
+
+    per_category = {}
+    for cat in categories:
+        bin_rows = [
+            [("1" if cat in s else "0") for s in sets_by_diff[d]]
+            for d in diff_ids
+        ]
+        present = sum(r.count("1") for r in bin_rows)
+        prevalence = present / (len(bin_rows) * n_raters) if bin_rows else float("nan")
+        disagree = (
+            sum(1 for r in bin_rows if len(set(r)) > 1) / len(bin_rows)
+            if bin_rows else float("nan")
+        )
+        per_category[cat] = {
+            "prevalence": prevalence,
+            "presence_disagreement_rate": disagree,
+            "fleiss_kappa": fleiss_kappa(bin_rows, ["0", "1"]),
+            "krippendorff_alpha": krippendorff_alpha_nominal(bin_rows),
+        }
+
+    fleiss_vals = [
+        v["fleiss_kappa"] for v in per_category.values()
+        if not math.isnan(v["fleiss_kappa"])
+    ]
+
+    return {
+        "raters": rater_names,
+        "reference_in_pool": ref_name,
+        "n_raters": n_raters,
+        "n_items": len(diff_ids),
+        "threshold": threshold,
+        "mean_pairwise_jaccard": _mean(list(pair_jaccard.values())),
+        "mean_per_category_fleiss_kappa": _mean(fleiss_vals) if fleiss_vals else float("nan"),
+        "pairwise_jaccard": {
+            f"{rater_names[a]} vs {rater_names[b]}": v for (a, b), v in pair_jaccard.items()
+        },
+        # Which pairs involve the reference: lets the chart (and any downstream
+        # reader) separate ref-vs-study pairs from study-vs-study ones.
+        "ref_involved": {
+            f"{rater_names[a]} vs {rater_names[b]}": (a == ref_index or b == ref_index)
+            for (a, b) in pair_jaccard
+        },
+        "per_category": per_category,
+    }
+
+
 def analyse_maintenance(
     aligned: dict[str, list[dict]],
     model_names: list[str],
@@ -747,7 +847,33 @@ def print_report(result: dict) -> None:
                     f"    {model:24s} {c['base_agreement']:8.3f} {_fmt(c['base_cohen_kappa'])} "
                     f"{c['class_agreement']:9.3f} {_fmt(c['class_cohen_kappa'])}"
                 )
+
+    pooled = result.get("pooled_agreement")
+    if pooled:
+        print(f"\n[7] POOLED AGREEMENT  ({pooled['n_raters']} raters incl. "
+              f"{pooled['reference_in_pool']}, {pooled['n_items']} diffs)")
+        print("    descriptive only -- the reference is inside the pool, so this")
+        print("    does NOT validate it; see [5]/[6] for that.")
+        print(f"    mean pairwise Jaccard       : {_fmt(pooled['mean_pairwise_jaccard'])}")
+        print(f"    mean per-category Fleiss K  : {_fmt(pooled['mean_per_category_fleiss_kappa'])}")
+        print("    per pair (ref-involving pairs marked '*'):")
+        for pair, v in sorted(pooled["pairwise_jaccard"].items(), key=lambda kv: kv[1], reverse=True):
+            mark = "*" if pooled["ref_involved"][pair] else " "
+            print(f"      {mark} {pair:52s} {_fmt(v)}")
     print("=" * 72)
+
+
+def _json_safe(obj):
+    """Recursively replace NaN/Infinity floats with None so the emitted JSON is
+    strictly valid (json.dumps writes bare NaN by default, which browsers'
+    JSON.parse rejects, breaking the webapp report fetch)."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
 
 
 def write_outputs(result: dict, report_dir: Path) -> None:
@@ -758,7 +884,8 @@ def write_outputs(result: dict, report_dir: Path) -> None:
     maint = result.get("maintenance_agreement")
     maint_per_instance = maint.pop("_per_instance", None) if isinstance(maint, dict) else None
     (report_dir / "summary.json").write_text(
-        json.dumps(result, indent=2, default=str), encoding="utf-8"
+        json.dumps(_json_safe(result), indent=2, default=str, allow_nan=False),
+        encoding="utf-8",
     )
 
     # per-category table (multi-label + ambiguity merged).
@@ -1011,6 +1138,42 @@ def make_charts(result: dict, report_dir: Path) -> None:
         plt.tight_layout()
         _save(plt, report_dir / "reference_category_kappa.png")
 
+    # (f2) Pooled agreement: every rater pair (reference included) over the full
+    #      label vector. Bars are coloured by whether the reference takes part,
+    #      because the point of the figure is whether the ref-involving pairs sit
+    #      inside the spread of the study-only pairs or separate out from them --
+    #      a single pooled mean would hide exactly that.
+    pooled = result.get("pooled_agreement")
+    if pooled:
+        pairs = sorted(pooled["pairwise_jaccard"], key=pooled["pairwise_jaccard"].get)
+        vals = [pooled["pairwise_jaccard"][p] for p in pairs]
+        colors = ["#edae49" if pooled["ref_involved"][p] else "#2e4057" for p in pairs]
+
+        plt.figure(figsize=(12, 6))
+        bars = plt.barh(range(len(pairs)), vals, color=colors)
+        for rect, v in zip(bars, vals):
+            plt.text(rect.get_width(), rect.get_y() + rect.get_height() / 2,
+                     f" {v:.3f}", va="center", fontsize=8)
+        plt.yticks(range(len(pairs)), pairs)
+        mean_j = pooled["mean_pairwise_jaccard"]
+        plt.axvline(mean_j, color="#d1495b", linestyle="--", linewidth=1.5)
+        # Above the top bar: the lower-right corner is taken by the legend.
+        plt.text(mean_j, len(pairs) - 0.5, f" pooled mean {mean_j:.3f}",
+                 color="#d1495b", fontsize=8, va="bottom")
+        plt.xlim(0, 1)
+        plt.xlabel(f"Mean pairwise Jaccard (multi-label, threshold {pooled['threshold']})")
+        plt.title(
+            f"Pooled agreement over the full vector — {pooled['n_raters']} raters, "
+            f"{pooled['n_items']} diffs (descriptive; not a validation of "
+            f"{pooled['reference_in_pool']})"
+        )
+        plt.plot([], [], color="#2e4057", linewidth=6, label="study model vs study model")
+        plt.plot([], [], color="#edae49", linewidth=6,
+                 label=f"{pooled['reference_in_pool']} vs study model")
+        plt.legend(loc="lower right", fontsize=8)
+        plt.tight_layout()
+        _save(plt, report_dir / "pooled_agreement.png")
+
     maint = result.get("maintenance_agreement")
     if maint:
         _maintenance_charts(maint, plt, report_dir)
@@ -1192,6 +1355,15 @@ def main() -> None:
             result["reference_comparison"] = analyse_vs_reference(
                 ref_aligned, ref_records, args.models, args.reference, categories, args.threshold
             )
+            # Descriptive: all 4 models pooled as raters over the full vector.
+            # Kept separate from reference_comparison, which is the actual
+            # evaluation of the reference (see analyse_pooled's docstring).
+            pooled = analyse_pooled(
+                ref_aligned, ref_records, args.models, args.reference,
+                categories, args.threshold,
+            )
+            if pooled:
+                result["pooled_agreement"] = pooled
             if maint is not None:
                 maint_ref = analyse_maintenance_vs_reference(
                     ref_aligned, ref_records, args.models, args.reference
