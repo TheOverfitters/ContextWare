@@ -1,0 +1,9 @@
+model,granularity,n_items,accuracy,macro_precision,macro_recall,macro_f1,weighted_precision,weighted_recall,weighted_f1
+glm-5.2:cloud,leaf_type,149,0.557,0.5383,0.5778,0.55,0.5815,0.557,0.5552
+glm-5.2:cloud,base_type,149,0.557,0.5238,0.5711,0.5378,0.5815,0.557,0.5552
+kimi-k2.7-code:cloud,leaf_type,149,0.5772,0.5755,0.5461,0.5347,0.6295,0.5772,0.5766
+kimi-k2.7-code:cloud,base_type,149,0.5772,0.5773,0.5553,0.544,0.6322,0.5772,0.579
+qwen3.5:cloud,leaf_type,149,0.5369,0.3042,0.327,0.3066,0.5569,0.5369,0.529
+qwen3.5:cloud,base_type,149,0.5503,0.465,0.4369,0.4295,0.5871,0.5503,0.5476
+gemma4:31b-cloud,leaf_type,149,0.5772,0.4801,0.4782,0.4515,0.6199,0.5772,0.5741
+gemma4:31b-cloud,base_type,149,0.5772,0.4761,0.5071,0.4618,0.6199,0.5772,0.5741

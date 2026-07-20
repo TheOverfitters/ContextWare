@@ -1,0 +1,175 @@
+{
+  "config": {
+    "gold": "D:\\Progetti\\ContextWare\\golden-standard\\gold-sample\\gold_sample_blind.xlsx",
+    "predictions": "D:\\Progetti\\ContextWare\\acf-analysis\\acf-outputs",
+    "threshold": 0.5,
+    "n_items_evaluated": 150,
+    "models": [
+      "glm-5.2:cloud",
+      "kimi-k2.7-code:cloud",
+      "qwen3.5:cloud",
+      "gemma4:31b-cloud"
+    ]
+  },
+  "category_axis": {
+    "glm-5.2:cloud": {
+      "n_items": 150,
+      "micro_precision": 0.6969,
+      "micro_recall": 0.567,
+      "micro_f1": 0.6253,
+      "macro_precision": 0.7218,
+      "macro_recall": 0.4949,
+      "macro_f1": 0.5505,
+      "weighted_precision": 0.7367,
+      "weighted_recall": 0.567,
+      "weighted_f1": 0.6107,
+      "exact_match_ratio": 0.18,
+      "mean_jaccard": 0.5131,
+      "hamming_loss": 0.1458,
+      "hamming_accuracy": 0.8542
+    },
+    "kimi-k2.7-code:cloud": {
+      "n_items": 150,
+      "micro_precision": 0.6856,
+      "micro_recall": 0.6097,
+      "micro_f1": 0.6454,
+      "macro_precision": 0.6877,
+      "macro_recall": 0.5488,
+      "macro_f1": 0.5876,
+      "weighted_precision": 0.7107,
+      "weighted_recall": 0.6097,
+      "weighted_f1": 0.6369,
+      "exact_match_ratio": 0.1867,
+      "mean_jaccard": 0.5183,
+      "hamming_loss": 0.1437,
+      "hamming_accuracy": 0.8562
+    },
+    "qwen3.5:cloud": {
+      "n_items": 150,
+      "micro_precision": 0.6645,
+      "micro_recall": 0.5961,
+      "micro_f1": 0.6285,
+      "macro_precision": 0.6911,
+      "macro_recall": 0.5267,
+      "macro_f1": 0.567,
+      "weighted_precision": 0.6993,
+      "weighted_recall": 0.5961,
+      "weighted_f1": 0.6184,
+      "exact_match_ratio": 0.1733,
+      "mean_jaccard": 0.5134,
+      "hamming_loss": 0.1512,
+      "hamming_accuracy": 0.8488
+    },
+    "gemma4:31b-cloud": {
+      "n_items": 150,
+      "micro_precision": 0.602,
+      "micro_recall": 0.8019,
+      "micro_f1": 0.6878,
+      "macro_precision": 0.6012,
+      "macro_recall": 0.7668,
+      "macro_f1": 0.6634,
+      "weighted_precision": 0.6285,
+      "weighted_recall": 0.8019,
+      "weighted_f1": 0.6963,
+      "exact_match_ratio": 0.1067,
+      "mean_jaccard": 0.5374,
+      "hamming_loss": 0.1562,
+      "hamming_accuracy": 0.8438
+    }
+  },
+  "maintenance_axis": {
+    "glm-5.2:cloud / leaf_type": {
+      "n_items": 149,
+      "accuracy": 0.557,
+      "macro_precision": 0.5383,
+      "macro_recall": 0.5778,
+      "macro_f1": 0.55,
+      "weighted_precision": 0.5815,
+      "weighted_recall": 0.557,
+      "weighted_f1": 0.5552
+    },
+    "glm-5.2:cloud / base_type": {
+      "n_items": 149,
+      "accuracy": 0.557,
+      "macro_precision": 0.5238,
+      "macro_recall": 0.5711,
+      "macro_f1": 0.5378,
+      "weighted_precision": 0.5815,
+      "weighted_recall": 0.557,
+      "weighted_f1": 0.5552
+    },
+    "kimi-k2.7-code:cloud / leaf_type": {
+      "n_items": 149,
+      "accuracy": 0.5772,
+      "macro_precision": 0.5755,
+      "macro_recall": 0.5461,
+      "macro_f1": 0.5347,
+      "weighted_precision": 0.6295,
+      "weighted_recall": 0.5772,
+      "weighted_f1": 0.5766
+    },
+    "kimi-k2.7-code:cloud / base_type": {
+      "n_items": 149,
+      "accuracy": 0.5772,
+      "macro_precision": 0.5773,
+      "macro_recall": 0.5553,
+      "macro_f1": 0.544,
+      "weighted_precision": 0.6322,
+      "weighted_recall": 0.5772,
+      "weighted_f1": 0.579
+    },
+    "qwen3.5:cloud / leaf_type": {
+      "n_items": 149,
+      "accuracy": 0.5369,
+      "macro_precision": 0.3042,
+      "macro_recall": 0.327,
+      "macro_f1": 0.3066,
+      "weighted_precision": 0.5569,
+      "weighted_recall": 0.5369,
+      "weighted_f1": 0.529
+    },
+    "qwen3.5:cloud / base_type": {
+      "n_items": 149,
+      "accuracy": 0.5503,
+      "macro_precision": 0.465,
+      "macro_recall": 0.4369,
+      "macro_f1": 0.4295,
+      "weighted_precision": 0.5871,
+      "weighted_recall": 0.5503,
+      "weighted_f1": 0.5476
+    },
+    "gemma4:31b-cloud / leaf_type": {
+      "n_items": 149,
+      "accuracy": 0.5772,
+      "macro_precision": 0.4801,
+      "macro_recall": 0.4782,
+      "macro_f1": 0.4515,
+      "weighted_precision": 0.6199,
+      "weighted_recall": 0.5772,
+      "weighted_f1": 0.5741
+    },
+    "gemma4:31b-cloud / base_type": {
+      "n_items": 149,
+      "accuracy": 0.5772,
+      "macro_precision": 0.4761,
+      "macro_recall": 0.5071,
+      "macro_f1": 0.4618,
+      "weighted_precision": 0.6199,
+      "weighted_recall": 0.5772,
+      "weighted_f1": 0.5741
+    }
+  },
+  "semantic_ambiguity": {
+    "n_items": 150,
+    "mean_category_divergence": 0.3808,
+    "mean_maintenance_entropy": 0.316,
+    "share_unanimous_categories": 0.0667,
+    "share_unanimous_maintenance": 0.6733,
+    "corr_divergence_vs_error": 0.3667,
+    "error_by_divergence_tercile": {
+      "low_divergence": 0.4047093878343878,
+      "mid_divergence": 0.45381836219336225,
+      "high_divergence": 0.579839923964924
+    }
+  }
+}
