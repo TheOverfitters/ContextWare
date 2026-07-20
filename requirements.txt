@@ -1,32 +1,9 @@
-# ContextWare - dipendenze di terze parti
-#
-# Tutte le altre librerie usate nel progetto (argparse, json, csv, glob, math,
-# hashlib, random, re, shutil, subprocess, threading, asyncio, urllib, http.client,
-# pathlib, collections, itertools, dataclasses, typing, datetime, textwrap, logging,
-# socket, concurrent.futures) fanno parte della standard library di Python.
-#
-# Installazione:  pip install -r requirements.txt
-# Python richiesto: >= 3.10  (uso di `X | Y` nelle annotazioni di tipo)
-
-# --- Analisi dati e grafici ------------------------------------------------
-# acf-analysis/category_analysis.py, acf-analysis/agreement_analysis.py,
-# golden_results/evaluate_against_gold.py, data-manipulation/notebook/*.ipynb
 pandas>=2.2
 numpy>=1.26
 matplotlib>=3.8
 seaborn>=0.13
-
-# --- Lettura/scrittura file Excel -----------------------------------------
-# golden-standard/build_gold_sample.py, golden_results/evaluate_against_gold.py
 openpyxl>=3.1
-
-# --- Webapp ----------------------------------------------------------------
-# webapp/server.py
 quart>=0.19
 httpx>=0.27
-
-# --- Notebook Jupyter ------------------------------------------------------
-# data-manipulation/notebook/dataset_cleaning.ipynb
-# data-manipulation/notebook/repo_context_report.ipynb
 ipykernel>=6.29
 ipython>=8.18
