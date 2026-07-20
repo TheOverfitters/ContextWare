@@ -495,11 +495,40 @@
 
             <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
             <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-yellow);">Golden Standard</h2>
-            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Detailed analysis of golden standard discrepancies and compliance</p>
-            
+            <p style="text-align: center; line-height: 1.6; margin-bottom: 1rem;">Model predictions evaluated against the manually annotated gold sample (150 items, 4 models)</p>
+
+            <h3 style="color: var(--brand-pink); font-size: 1.3rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Category Axis</h3>
             <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%;">
 
+                <div class="result-card zoomable" onclick="openModal('static/image/golden/category_prf.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Category Accuracy / Precision / Recall / F1</h3>
+                    <img src="static/image/golden/category_prf.png" alt="Category axis (multi-label, micro) vs golden standard" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
 
+            </div>
+
+            <h3 style="color: var(--brand-pink); font-size: 1.3rem; margin-top: 2rem; margin-bottom: 1rem; text-align: center;">Maintenance Axis</h3>
+            <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%;">
+
+                <div class="result-card secondary zoomable" onclick="openModal('static/image/golden/maintenance_prf.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Maintenance Accuracy / Precision / Recall / F1</h3>
+                    <img src="static/image/golden/maintenance_prf.png" alt="Maintenance axis (single-label, macro) vs golden standard" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+                <div class="result-card zoomable" onclick="openModal('static/image/golden/maintenance_per_class.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-yellow); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Maintenance Per-Class Metrics</h3>
+                    <img src="static/image/golden/maintenance_per_class.png" alt="Maintenance axis per-class Precision / Recall / F1 vs golden standard" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
+
+            </div>
+
+            <h3 style="color: var(--brand-pink); font-size: 1.3rem; margin-top: 2rem; margin-bottom: 1rem; text-align: center;">Semantic Ambiguity</h3>
+            <div style="display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center; width: 100%;">
+
+                <div class="result-card secondary zoomable" onclick="openModal('static/image/golden/divergence_vs_error.png')" style="min-height: 250px; display: flex; flex-direction: column; align-items: center; padding: 1.5rem;">
+                    <h3 style="color: var(--brand-pink); font-size: 1.1rem; margin-top: 0; margin-bottom: 1rem; text-align: center;">Divergence vs Error</h3>
+                    <img src="static/image/golden/divergence_vs_error.png" alt="Inter-model divergence vs mean model error against gold" style="width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); margin: auto;">
+                </div>
 
             </div>
         </section>

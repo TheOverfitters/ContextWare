@@ -5,5 +5,6 @@ data-manipulation/dataset/dataset.parquet
 .env
 acf-analysis/__pycache__/
 outputs/
+webapp/__pycache__/
 golden_results/data
 golden-standard/gold-sample/
