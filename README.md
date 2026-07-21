@@ -71,6 +71,26 @@ The repository is structured into distinct modules handling specific phases of t
 
 
 
+## Non-Functional Requirements
+
+Beyond its features, the pipeline is engineered around four quality attributes that keep it reliable, extensible, and auditable.
+
+### Reproducibility
+Runs are deterministic (**temperature 0**), all models share a common timestamp, and every diff keeps a stable `diff_id`, so any execution of the pipeline yields the same results.
+
+### Robustness
+Each diff carries a processing status with automatic retry and fallback, and interrupted runs can resume where they stopped, keeping coverage high even when an LLM returns a malformed response.
+
+### Modularity & Extensibility
+The pipeline is split into single-responsibility modules and driven by an external, configurable taxonomy: adding a new category or LLM needs no change to the core logic, and models are evaluated in parallel.
+
+### Traceability
+Every stage leaves inspectable artifacts — per-model outputs realignable by `diff_id`, metrics stored in open formats (JSON/CSV), and an independent blind gold standard — so each result can be traced back to its raw data.
+
+
+
+
+
 ## Getting Started
 
 The project is fully tested and optimized for **Windows 11**.
