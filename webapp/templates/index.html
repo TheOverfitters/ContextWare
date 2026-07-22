@@ -1181,6 +1181,55 @@
                 </div>
             `;
 
+            // Maintenance-reason axis (ISO/IEC/IEEE 14764): per base type agreement,
+            // plus the two label spaces (base type / parent class) side by side
+            const maintAgr = summary.maintenance_agreement || {};
+            const perType = maintAgr.per_type || {};
+            let maintenanceSection = '';
+            if (Object.keys(perType).length) {
+                const maintTypeRows = Object.entries(perType).map(([label, m]) => ({
+                    label,
+                    raw: 1 - (m.presence_disagreement_rate || 0),
+                    kappa: m.fleiss_kappa,
+                    prev: m.prevalence || 0,
+                })).sort((a, b) => b.raw - a.raw);
+
+                const base = maintAgr.base_type || {};
+                const cls = maintAgr.parent_class || {};
+                const kFmt = (v) => Number.isFinite(v) ? v.toFixed(2) : '—';
+                const axisRows = [
+                    { label: 'Base type', pct: base.percent_full_agreement || 0,
+                      context: `Fleiss κ ${kFmt(base.fleiss_kappa)} · α ${kFmt(base.krippendorff_alpha)}` },
+                    { label: 'Parent class (Correction / Enhancement)', pct: cls.percent_full_agreement || 0,
+                      context: `Fleiss κ ${kFmt(cls.fleiss_kappa)} · α ${kFmt(cls.krippendorff_alpha)}` },
+                ];
+
+                const maintKPIs = statRow([
+                    ['Base type — full agreement',
+                     Number.isFinite(base.percent_full_agreement) ? (base.percent_full_agreement * 100).toFixed(1) + '%' : '—',
+                     'var(--brand-yellow)'],
+                    ['Base type — Fleiss κ', kFmt(base.fleiss_kappa), 'var(--brand-orange)'],
+                    ['Parent class — full agreement',
+                     Number.isFinite(cls.percent_full_agreement) ? (cls.percent_full_agreement * 100).toFixed(1) + '%' : '—',
+                     'var(--brand-pink)'],
+                    ['Parent class — Fleiss κ', kFmt(cls.fleiss_kappa), 'var(--brand-blue)'],
+                ]);
+
+                maintenanceSection = `
+                    <hr style="width: 60%; border-color: rgba(255,255,255,0.1); margin: 3rem 0 1rem 0;">
+                    <h2 class="prompt-headline" style="font-size: 1.8rem; text-align: center; color: var(--brand-orange);">Maintenance Agreement</h2>
+                    <p style="text-align: center; line-height: 1.6; max-width: 760px; margin-bottom: 1.5rem;">
+                        Agreement on the <strong>reason</strong> behind each change (ISO/IEC/IEEE 14764), scored on the
+                        <strong>${Object.keys(perType).length}</strong> base types
+                    </p>
+                    <div style="width: 100%; max-width: 1000px; margin: 0 auto;">${maintKPIs}</div>
+                    <div class="results">
+                        ${categoryAgreementCard('Raw agreement by maintenance type', maintTypeRows)}
+                        ${refAgreementCard('Full agreement by label space', axisRows)}
+                    </div>
+                `;
+            }
+
             // Agreement of each study model vs the Gemma reference: category + maintenance
             const refCat = summary.reference_comparison;
             const refMaint = summary.maintenance_agreement && summary.maintenance_agreement.reference_comparison;
@@ -1232,6 +1281,8 @@
                 <div style="width: 100%; max-width: 1000px; margin: 0 auto;">${agreementKPIs}</div>
 
                 ${categorySection}
+
+                ${maintenanceSection}
 
                 ${referenceSection}
             `;

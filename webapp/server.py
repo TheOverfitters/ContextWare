@@ -456,6 +456,19 @@ async def stream_multi_model():
                 yield f"event: multi_complete\ndata: {json.dumps({'message': 'Loaded cached validation.', 'report_id': report_id})}\n\n"
                 return
 
+            # Second-level cache: the report folder may be gone (it is not
+            # tracked in git) while memory/ still holds every model's raw
+            # output. In that case replay the archive instead of re-querying
+            # the LLMs, and only recompute the agreement metrics.
+            archived: dict[str, Path] = {}
+            if slug and not refresh:
+                for model in models_to_run:
+                    model_archive = MEMORY_DIR / slug / "multi" / _safe_name(model)
+                    runs = sorted(model_archive.glob("primary_*.jsonl"))
+                    if runs:
+                        archived[model] = runs[-1]
+            replay_from_memory = len(archived) == len(models_to_run)
+
             env_path = server_dir / ".env"
             if not env_path.exists():
                 env_path = server_dir.parent / ".env"
@@ -474,7 +487,10 @@ async def stream_multi_model():
             queue = asyncio.Queue()
             
             # Put initial status in the queue
-            await queue.put(f"event: multi_status\ndata: {json.dumps({'message': f'Starting multi-model validation for {len(models_to_run)} models...'})}\n\n")
+            if replay_from_memory:
+                await queue.put(f"event: multi_status\ndata: {json.dumps({'message': f'Found {len(archived)} archived model runs in memory — skipping inference, recomputing metrics...'})}\n\n")
+            else:
+                await queue.put(f"event: multi_status\ndata: {json.dumps({'message': f'Starting multi-model validation for {len(models_to_run)} models...'})}\n\n")
 
             async def run_model(model):
                 await queue.put(f"event: multi_status\ndata: {json.dumps({'message': f'[{model}] Booting instance...'})}\n\n")
@@ -520,22 +536,31 @@ async def stream_multi_model():
                     await queue.put(f"event: multi_status\ndata: {json.dumps({'message': f'[{model}] FAILED to launch: {str(e)}'})}\n\n")
 
             async def orchestrate():
-                # Launch all models concurrently
-                tasks = [asyncio.create_task(run_model(model)) for model in models_to_run]
-                await asyncio.gather(*tasks)
+                if replay_from_memory:
+                    # Restore the archived runs under the current timestamp so the
+                    # agreement script finds them where it expects
+                    for model, src in archived.items():
+                        dst_dir = output_dir / sanitize_model_name(model)
+                        dst_dir.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, dst_dir / f"primary_{timestamp}.jsonl")
+                        await queue.put(f"event: multi_status\ndata: {json.dumps({'message': f'[{model}] DONE -> OK (from memory: {src.name})'})}\n\n")
+                else:
+                    # Launch all models concurrently
+                    tasks = [asyncio.create_task(run_model(model)) for model in models_to_run]
+                    await asyncio.gather(*tasks)
 
-                # Archive each model's raw output under memory/<repo>/multi/<model>/
-                # so the per-repo history is kept alongside the cached report
-                if slug:
-                    for model in models_to_run:
-                        src = output_dir / sanitize_model_name(model) / f"primary_{timestamp}.jsonl"
-                        if src.exists():
-                            dst_dir = MEMORY_DIR / slug / "multi" / _safe_name(model)
-                            dst_dir.mkdir(parents=True, exist_ok=True)
-                            try:
-                                shutil.copy2(src, dst_dir / src.name)
-                            except Exception as copy_err:
-                                print(f"[memory] copy failed for {model}: {copy_err}")
+                    # Archive each model's raw output under memory/<repo>/multi/<model>/
+                    # so the per-repo history is kept alongside the cached report
+                    if slug:
+                        for model in models_to_run:
+                            src = output_dir / sanitize_model_name(model) / f"primary_{timestamp}.jsonl"
+                            if src.exists():
+                                dst_dir = MEMORY_DIR / slug / "multi" / _safe_name(model)
+                                dst_dir.mkdir(parents=True, exist_ok=True)
+                                try:
+                                    shutil.copy2(src, dst_dir / src.name)
+                                except Exception as copy_err:
+                                    print(f"[memory] copy failed for {model}: {copy_err}")
 
                 # Build a Gemma reference file from the webapp's own cached results
                 # for this repo, so the agreement script can benchmark
